@@ -1,17 +1,7 @@
----
-title: Gene Literature Miner
-emoji: 🧬
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # 🧬 Gene Literature Miner
 
-Mine the scientific literature for the genes discussed on a topic, then pull each
-gene's **nucleotide sequence**, **protein sequence**, **functional annotation**,
+Mine the scientific literature for the genes discussed in a publication, then pull
+each gene's **nucleotide sequence**, **protein sequence**, **functional annotation**,
 and **cross-species homologues** — all from open databases, no API key required.
 
 **Example:** search *biofilm formation* in *Staphylococcus aureus* → the tool
@@ -74,17 +64,6 @@ KEGG), and a **Find homologues** expander per gene. Export buttons:
 - **Nucleotide FASTA** / **Protein FASTA**
 - **CSV** (gene + sequence + protein summary)
 - **Download all (zip)** — both FASTA files, the CSV, and an `annotations.csv`
-
-## Configuration
-
-All optional, via environment variables:
-
-| Variable | Purpose |
-|----------|---------|
-| `NCBI_API_KEY` | Raises the NCBI rate limit from 3 → 10 req/s (get a free key at NCBI). |
-| `NCBI_EMAIL` | Contact address sent with NCBI requests (etiquette). |
-| `PER_IP_MIN_INTERVAL`, `MAX_CONCURRENT_SEARCHES` | Abuse guards for public hosting. |
-| `UNIREF_IDENTITY`, `CACHE_PATH`, `CACHE_TTL` | Default homology cluster and lookup cache. |
 
 ## Notes & limits
 
