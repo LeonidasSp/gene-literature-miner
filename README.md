@@ -1,6 +1,16 @@
+---
+title: Gene Literature Miner
+emoji: 🧬
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # 🧬 Gene Literature Miner
 
-A local web app that mines the literature for genes on a topic and pulls their
+A web app that mines the literature for genes on a topic and pulls their
 nucleotide sequences from NCBI.
 
 **Example:** search *biofilm* in *Staphylococcus aureus* → the tool finds the

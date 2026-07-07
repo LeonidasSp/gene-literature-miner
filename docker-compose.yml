@@ -3,7 +3,7 @@ services:
     build: .
     container_name: gene-literature-miner
     ports:
-      - "8000:8000"
+      - "8000:7860"   # open http://localhost:8000 (container serves on 7860)
     environment:
       # Used as the polite contact address on NCBI requests.
       - NCBI_EMAIL=le.spathis@gmail.com

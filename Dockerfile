@@ -8,6 +8,7 @@ COPY backend ./backend
 COPY frontend ./frontend
 
 WORKDIR /app/backend
-EXPOSE 8000
-# Honor the platform-injected $PORT (Render/Cloud Run/Fly set this); default 8000 locally.
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+EXPOSE 7860
+# Honor the platform-injected $PORT (Render/Fly/Cloud Run set this). Default 7860 so
+# it also runs on Hugging Face Spaces (which serves containers on 7860) with no config.
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}"]
