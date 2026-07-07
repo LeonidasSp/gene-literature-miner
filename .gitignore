@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+backend/_smoketest.py
+backend/_httptest.py

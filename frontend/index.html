@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gene Literature Miner</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #273449; --text: #e2e8f0;
+    --muted: #94a3b8; --accent: #38bdf8; --accent2: #34d399; --border: #334155;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.45;
+  }
+  header { padding: 24px 28px 8px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 12px 28px 60px; max-width: 1200px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input, button { font: inherit; }
+  input[type=text], input[type=number] {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 9px 11px; outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  .grow { flex: 1; min-width: 220px; }
+  button {
+    background: var(--accent); color: #04222f; border: none; border-radius: 8px;
+    padding: 10px 18px; font-weight: 600; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button:disabled { opacity: .55; cursor: default; }
+  .status { margin: 16px 0; color: var(--muted); font-size: 14px; min-height: 20px; }
+  .meta { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
+  .meta b { color: var(--text); }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); cursor: pointer; user-select: none; }
+  tr:hover td { background: rgba(148,163,184,.06); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .sym { font-weight: 700; }
+  .pill { display: inline-block; background: var(--panel2); border: 1px solid var(--border);
+          border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
+  .seqbtn { background: transparent; color: var(--accent2); border: 1px solid var(--accent2);
+            padding: 4px 10px; border-radius: 7px; font-size: 12px; }
+  .noseq { color: var(--muted); font-size: 12px; }
+  .seqbox { display: none; background: #0b1220; border: 1px solid var(--border); border-radius: 8px;
+            padding: 10px; margin-top: 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
+  .toolbar { display: flex; gap: 10px; margin: 14px 0 4px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧬 Gene Literature Miner</h1>
+  <div class="sub">Mine PubMed for genes on a topic, then pull their nucleotide sequences from NCBI.</div>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div class="grow">
+        <label>Topic / query</label>
+        <input id="query" type="text" placeholder="e.g. biofilm formation" class="grow" style="width:100%" />
+      </div>
+      <div class="grow">
+        <label>Organism (optional filter)</label>
+        <input id="organism" type="text" placeholder="e.g. Staphylococcus aureus" style="width:100%" />
+      </div>
+      <div>
+        <label>Max papers</label>
+        <input id="maxPapers" type="number" value="50" min="1" max="200" style="width:100px" />
+      </div>
+      <div>
+        <label>Min mentions</label>
+        <input id="minMentions" type="number" value="1" min="1" style="width:100px" />
+      </div>
+      <button id="go">Search</button>
+    </div>
+    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code>) keeps only genes whose NCBI Gene record matches that species.</div>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <div id="results" class="card" style="display:none">
+    <div id="meta" class="meta"></div>
+    <div class="toolbar">
+      <button class="ghost" id="exportFasta">⬇ Export FASTA</button>
+      <button class="ghost" id="exportCsv">⬇ Export CSV</button>
+    </div>
+    <div style="overflow:auto; max-height:70vh">
+      <table id="table">
+        <thead>
+          <tr>
+            <th data-k="symbol">Gene</th>
+            <th data-k="description">Description</th>
+            <th data-k="organism">Organism</th>
+            <th data-k="mention_count"># Mentions</th>
+            <th data-k="paper_count"># Papers</th>
+            <th>Papers (PMID)</th>
+            <th>Nucleotide sequence</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+let DATA = null;
+let sortKey = "mention_count";
+let sortDir = -1;
+
+const $ = (id) => document.getElementById(id);
+
+async function runSearch() {
+  const query = $("query").value.trim();
+  if (!query) { setStatus("Enter a topic to search."); return; }
+  $("go").disabled = true;
+  setStatus("Searching PubMed, extracting genes with PubTator, and fetching sequences from NCBI… this can take 10–40 s.");
+  $("results").style.display = "none";
+  try {
+    const resp = await fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        organism: $("organism").value.trim(),
+        max_papers: parseInt($("maxPapers").value) || 50,
+        min_mentions: parseInt($("minMentions").value) || 1,
+      }),
+    });
+    if (!resp.ok) throw new Error("Server error " + resp.status);
+    DATA = await resp.json();
+    render();
+  } catch (e) {
+    setStatus("❌ " + e.message);
+  } finally {
+    $("go").disabled = false;
+  }
+}
+
+function setStatus(msg) { $("status").textContent = msg; }
+
+function render() {
+  if (!DATA) return;
+  const genes = DATA.genes || [];
+  if (DATA.message && genes.length === 0) { setStatus(DATA.message); return; }
+  setStatus("");
+  $("results").style.display = "block";
+  const withSeq = genes.filter((g) => g.sequence).length;
+  $("meta").innerHTML =
+    `<span><b>${genes.length}</b> genes</span>` +
+    `<span><b>${DATA.paper_count}</b> PubMed articles</span>` +
+    `<span><b>${withSeq}</b> with sequences</span>` +
+    `<span>PubMed term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>`;
+  renderRows();
+}
+
+function renderRows() {
+  const genes = [...(DATA.genes || [])].sort((a, b) => {
+    let x = a[sortKey], y = b[sortKey];
+    if (typeof x === "string") { x = x.toLowerCase(); y = (y || "").toLowerCase(); }
+    return (x < y ? -1 : x > y ? 1 : 0) * sortDir;
+  });
+  const tb = $("tbody");
+  tb.innerHTML = "";
+  genes.forEach((g, i) => {
+    const tr = document.createElement("tr");
+    const pmids = (g.pmids || []).slice(0, 6)
+      .map((p) => `<a href="https://pubmed.ncbi.nlm.nih.gov/${p}/" target="_blank">${p}</a>`)
+      .join(", ") + ((g.pmids || []).length > 6 ? " …" : "");
+    const aliases = (g.aliases || []).map((a) => `<span class="pill">${escapeHtml(a)}</span>`).join("");
+    let seqCell;
+    if (g.sequence) {
+      const s = g.sequence;
+      seqCell =
+        `<div>${s.length.toLocaleString()} bp · strand ${s.strand} · ` +
+        `<a href="${s.url}" target="_blank">${s.accession}</a>:${s.region}</div>` +
+        `<button class="seqbtn" onclick="toggleSeq(${i})">Show sequence</button>` +
+        `<div class="seqbox" id="seq${i}">&gt;${escapeHtml(s.header)}\n${chunk(s.sequence)}</div>`;
+    } else {
+      seqCell = `<span class="noseq">no genomic coords / not fetched</span>`;
+    }
+    tr.innerHTML =
+      `<td><a class="sym" href="${g.gene_url}" target="_blank">${escapeHtml(g.symbol)}</a>` +
+      `<div>${aliases}</div></td>` +
+      `<td>${escapeHtml(g.description || "")}</td>` +
+      `<td><i>${escapeHtml(g.organism || "")}</i></td>` +
+      `<td>${g.mention_count}</td>` +
+      `<td>${g.paper_count}</td>` +
+      `<td>${pmids}</td>` +
+      `<td>${seqCell}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function toggleSeq(i) {
+  const el = $("seq" + i);
+  el.style.display = el.style.display === "block" ? "none" : "block";
+}
+
+function chunk(seq, n = 70) {
+  const out = [];
+  for (let i = 0; i < seq.length; i += n) out.push(seq.slice(i, i + n));
+  return out.join("\n");
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function download(name, text, type = "text/plain") {
+  const blob = new Blob([text], { type });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportFasta() {
+  const parts = [];
+  (DATA.genes || []).forEach((g) => {
+    if (!g.sequence) return;
+    const s = g.sequence;
+    parts.push(`>${g.symbol}|GeneID:${g.gene_id}|${g.organism}|${s.accession}:${s.region}(${s.strand})`);
+    parts.push(chunk(s.sequence));
+  });
+  if (!parts.length) { setStatus("No sequences to export."); return; }
+  download("genes.fasta", parts.join("\n") + "\n");
+}
+
+function exportCsv() {
+  const rows = [["symbol", "gene_id", "organism", "description", "mentions", "papers", "seq_accession", "seq_region", "seq_strand", "seq_length_bp", "gene_url", "pmids"]];
+  (DATA.genes || []).forEach((g) => {
+    const s = g.sequence || {};
+    rows.push([
+      g.symbol, g.gene_id, g.organism, g.description, g.mention_count, g.paper_count,
+      s.accession || "", s.region || "", s.strand || "", s.length || "",
+      g.gene_url, (g.pmids || []).join(" "),
+    ]);
+  });
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  download("genes.csv", csv, "text/csv");
+}
+
+document.querySelectorAll("th[data-k]").forEach((th) => {
+  th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    if (sortKey === k) sortDir *= -1;
+    else { sortKey = k; sortDir = (typeof (DATA.genes[0] || {})[k] === "string") ? 1 : -1; }
+    renderRows();
+  });
+});
+
+$("go").addEventListener("click", runSearch);
+["query", "organism", "maxPapers", "minMentions"].forEach((id) =>
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); }));
+</script>
+</body>
+</html>

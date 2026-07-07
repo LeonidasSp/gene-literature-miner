@@ -1,0 +1,12 @@
+services:
+  gene-literature-miner:
+    build: .
+    container_name: gene-literature-miner
+    ports:
+      - "8000:8000"
+    environment:
+      # Used as the polite contact address on NCBI requests.
+      - NCBI_EMAIL=le.spathis@gmail.com
+      # Optional: a free NCBI API key raises the rate limit 3/s -> 10/s.
+      # - NCBI_API_KEY=your_key_here
+    restart: unless-stopped

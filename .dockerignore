@@ -1,0 +1,5 @@
+**/__pycache__/
+**/*.pyc
+backend/_smoketest.py
+backend/_httptest.py
+README.md
