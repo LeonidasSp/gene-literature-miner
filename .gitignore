@@ -2,5 +2,12 @@ __pycache__/
 *.pyc
 .env
 .env.*
+
+# Never publish secrets or internal notes
+*.docx
+PROJECT_LOG.md
+
+# Local artifacts
+*.sqlite
 backend/_smoketest.py
 backend/_httptest.py

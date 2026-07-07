@@ -8,6 +8,7 @@
   :root {
     --bg: #0f172a; --panel: #1e293b; --panel2: #273449; --text: #e2e8f0;
     --muted: #94a3b8; --accent: #38bdf8; --accent2: #34d399; --border: #334155;
+    --warn: #fbbf24;
   }
   * { box-sizing: border-box; }
   body {
@@ -17,17 +18,17 @@
   header { padding: 24px 28px 8px; }
   h1 { margin: 0 0 4px; font-size: 22px; }
   .sub { color: var(--muted); font-size: 13px; }
-  main { padding: 12px 28px 60px; max-width: 1200px; }
+  main { padding: 12px 28px 60px; max-width: 1320px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
   .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
   label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-  input, button { font: inherit; }
-  input[type=text], input[type=number] {
+  input, button, select { font: inherit; }
+  input[type=text], input[type=number], select {
     background: var(--panel2); border: 1px solid var(--border); color: var(--text);
     border-radius: 8px; padding: 9px 11px; outline: none;
   }
-  input:focus { border-color: var(--accent); }
-  .grow { flex: 1; min-width: 220px; }
+  input:focus, select:focus { border-color: var(--accent); }
+  .grow { flex: 1; min-width: 200px; }
   button {
     background: var(--accent); color: #04222f; border: none; border-radius: 8px;
     padding: 10px 18px; font-weight: 600; cursor: pointer;
@@ -35,6 +36,8 @@
   button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
   button:disabled { opacity: .55; cursor: default; }
   .status { margin: 16px 0; color: var(--muted); font-size: 14px; min-height: 20px; }
+  .bar { height: 4px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin: 6px 0 0; display: none; }
+  .bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
   .meta { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
   .meta b { color: var(--text); }
   table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
@@ -47,12 +50,25 @@
   .pill { display: inline-block; background: var(--panel2); border: 1px solid var(--border);
           border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
   .seqbtn { background: transparent; color: var(--accent2); border: 1px solid var(--accent2);
-            padding: 4px 10px; border-radius: 7px; font-size: 12px; }
+            padding: 4px 10px; border-radius: 7px; font-size: 12px; cursor: pointer; }
   .noseq { color: var(--muted); font-size: 12px; }
+  .why { color: var(--warn); cursor: help; font-size: 11px; border-bottom: 1px dotted var(--warn); }
+  .spin { color: var(--accent); font-size: 12px; }
+  .badge { display: inline-block; border-radius: 5px; padding: 0 6px; font-size: 10px;
+           font-weight: 700; vertical-align: middle; }
+  .badge.rev { background: rgba(52,211,153,.15); color: var(--accent2); border: 1px solid var(--accent2); }
+  .badge.unrev { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
   .seqbox { display: none; background: #0b1220; border: 1px solid var(--border); border-radius: 8px;
             padding: 10px; margin-top: 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
             font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
-  .toolbar { display: flex; gap: 10px; margin: 14px 0 4px; }
+  .homobox { display: none; margin-top: 8px; font-size: 12px; }
+  .homobox table { margin: 0; font-size: 12px; }
+  .homobox td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  .homobtn { background: transparent; color: var(--accent); border: 1px solid var(--accent);
+             padding: 4px 10px; border-radius: 7px; font-size: 12px; cursor: pointer; }
+  .toolbar { display: flex; gap: 10px; margin: 14px 0 4px; flex-wrap: wrap; align-items: center; }
+  .ctl { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
+  .ctl select { padding: 5px 8px; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
   code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
 </style>
@@ -60,7 +76,7 @@
 <body>
 <header>
   <h1>🧬 Gene Literature Miner</h1>
-  <div class="sub">Mine PubMed for genes on a topic, then pull their nucleotide sequences from NCBI.</div>
+  <div class="sub">Mine the literature for genes on a topic, then pull their nucleotide + protein sequences, functional annotation, and homologues.</div>
 </header>
 <main>
   <div class="card">
@@ -74,25 +90,48 @@
         <input id="organism" type="text" placeholder="e.g. Staphylococcus aureus" style="width:100%" />
       </div>
       <div>
+        <label>Literature source</label>
+        <select id="source">
+          <option value="pubmed">PubMed</option>
+          <option value="europepmc">Europe PMC</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
+      <div>
         <label>Max papers</label>
-        <input id="maxPapers" type="number" value="50" min="1" max="200" style="width:100px" />
+        <input id="maxPapers" type="number" value="50" min="1" max="200" style="width:90px" />
       </div>
       <div>
         <label>Min mentions</label>
-        <input id="minMentions" type="number" value="1" min="1" style="width:100px" />
+        <input id="minMentions" type="number" value="1" min="1" style="width:90px" />
       </div>
       <button id="go">Search</button>
     </div>
-    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code>) keeps only genes whose NCBI Gene record matches that species.</div>
+    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code>) keeps only genes whose NCBI Gene record matches that species. Results stream in as each gene resolves.</div>
   </div>
 
   <div id="status" class="status"></div>
+  <div id="bar" class="bar"><span id="barFill"></span></div>
 
   <div id="results" class="card" style="display:none">
     <div id="meta" class="meta"></div>
     <div class="toolbar">
-      <button class="ghost" id="exportFasta">⬇ Export FASTA</button>
-      <button class="ghost" id="exportCsv">⬇ Export CSV</button>
+      <button class="ghost" id="exportFasta">⬇ Nucleotide FASTA</button>
+      <button class="ghost" id="exportProtFasta">⬇ Protein FASTA</button>
+      <button class="ghost" id="exportCsv">⬇ CSV</button>
+      <button class="ghost" id="exportBundle">⬇ Download all (zip)</button>
+      <span class="ctl">
+        Homologues:
+        <select id="homoSource">
+          <option value="uniref">UniRef (identity)</option>
+          <option value="orthodb">OrthoDB (orthologs)</option>
+        </select>
+        <select id="homoIdentity">
+          <option value="0.5">UniRef50</option>
+          <option value="0.9">UniRef90</option>
+          <option value="1.0">UniRef100</option>
+        </select>
+      </span>
     </div>
     <div style="overflow:auto; max-height:70vh">
       <table id="table">
@@ -105,6 +144,9 @@
             <th data-k="paper_count"># Papers</th>
             <th>Papers (PMID)</th>
             <th>Nucleotide sequence</th>
+            <th>Protein (UniProt)</th>
+            <th>Function</th>
+            <th>Homologues</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -117,51 +159,107 @@
 let DATA = null;
 let sortKey = "mention_count";
 let sortDir = -1;
+let ES = null;          // active EventSource
+let enrichDone = 0, enrichTotal = 0;
 
 const $ = (id) => document.getElementById(id);
 
-async function runSearch() {
+function runSearch() {
   const query = $("query").value.trim();
   if (!query) { setStatus("Enter a topic to search."); return; }
+  if (ES) { ES.close(); ES = null; }
   $("go").disabled = true;
-  setStatus("Searching PubMed, extracting genes with PubTator, and fetching sequences from NCBI… this can take 10–40 s.");
   $("results").style.display = "none";
-  try {
-    const resp = await fetch("/api/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query,
-        organism: $("organism").value.trim(),
-        max_papers: parseInt($("maxPapers").value) || 50,
-        min_mentions: parseInt($("minMentions").value) || 1,
-      }),
-    });
-    if (!resp.ok) throw new Error("Server error " + resp.status);
-    DATA = await resp.json();
+  enrichDone = 0; enrichTotal = 0;
+  setStatus("Searching the literature and extracting genes with PubTator…");
+  showBar(0);
+
+  const params = new URLSearchParams({
+    query,
+    organism: $("organism").value.trim(),
+    max_papers: parseInt($("maxPapers").value) || 50,
+    min_mentions: parseInt($("minMentions").value) || 1,
+    max_genes_with_sequence: 30,
+    source: $("source").value,
+  });
+  const es = new EventSource("/api/search/stream?" + params.toString());
+  ES = es;
+
+  es.addEventListener("meta", (e) => {
+    const m = JSON.parse(e.data);
+    DATA = { ...m, genes: [] };
+    setStatus(`Found ${m.paper_count} article(s); resolving ${m.gene_count} gene(s)…`);
+  });
+  es.addEventListener("genes", (e) => {
+    const { genes } = JSON.parse(e.data);
+    DATA.genes = genes;
+    enrichTotal = Math.min(genes.length, 30);
     render();
-  } catch (e) {
-    setStatus("❌ " + e.message);
-  } finally {
-    $("go").disabled = false;
-  }
+    setStatus(`Resolving sequences & proteins… 0 / ${enrichTotal}`);
+    showBar(enrichTotal ? 2 : 100);
+  });
+  es.addEventListener("enrich", (e) => {
+    const p = JSON.parse(e.data);
+    const g = (DATA.genes || []).find((x) => x.gene_id === p.gene_id);
+    if (g) {
+      g.sequence = p.sequence; g.protein = p.protein;
+      g.reason = p.reason; g.gene_url = p.gene_url || g.gene_url;
+      enrichRow(g);
+    }
+    enrichDone++;
+    setStatus(`Resolving sequences & proteins… ${enrichDone} / ${enrichTotal}`);
+    showBar(enrichTotal ? (enrichDone / enrichTotal) * 100 : 100);
+    updateMeta();
+  });
+  es.addEventListener("done", (e) => {
+    const d = JSON.parse(e.data);
+    finish();
+    // Genes ranked beyond the enrichment cap were never fetched — stop their spinners.
+    (DATA.genes || []).forEach((g) => {
+      if (g.sequence === null && g.protein === null && g.reason === null) {
+        g.reason = "not fetched (only the top 30 genes are enriched)";
+        enrichRow(g);
+      }
+    });
+    if ((DATA.genes || []).length === 0) setStatus(d.message || "No genes found.");
+    else setStatus("");
+  });
+  es.addEventListener("error", () => {
+    // Either a server 'error' event or a dropped connection.
+    finish();
+    if (!DATA || !(DATA.genes || []).length) setStatus("❌ Search failed or connection lost.");
+  });
+}
+
+function finish() {
+  if (ES) { ES.close(); ES = null; }
+  $("go").disabled = false;
+  hideBar();
 }
 
 function setStatus(msg) { $("status").textContent = msg; }
+function showBar(pct) { $("bar").style.display = "block"; $("barFill").style.width = pct + "%"; }
+function hideBar() { setTimeout(() => { $("bar").style.display = "none"; }, 600); }
 
 function render() {
   if (!DATA) return;
-  const genes = DATA.genes || [];
-  if (DATA.message && genes.length === 0) { setStatus(DATA.message); return; }
-  setStatus("");
   $("results").style.display = "block";
+  updateMeta();
+  renderRows();
+}
+
+function updateMeta() {
+  if (!DATA) return;
+  const genes = DATA.genes || [];
   const withSeq = genes.filter((g) => g.sequence).length;
+  const withProt = genes.filter((g) => g.protein).length;
   $("meta").innerHTML =
     `<span><b>${genes.length}</b> genes</span>` +
-    `<span><b>${DATA.paper_count}</b> PubMed articles</span>` +
-    `<span><b>${withSeq}</b> with sequences</span>` +
-    `<span>PubMed term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>`;
-  renderRows();
+    `<span><b>${DATA.paper_count}</b> articles</span>` +
+    `<span><b>${withSeq}</b> nucleotide</span>` +
+    `<span><b>${withProt}</b> protein</span>` +
+    `<span>source: <code>${escapeHtml(DATA.source || "pubmed")}</code></span>` +
+    `<span>term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>`;
 }
 
 function renderRows() {
@@ -172,23 +270,13 @@ function renderRows() {
   });
   const tb = $("tbody");
   tb.innerHTML = "";
-  genes.forEach((g, i) => {
+  genes.forEach((g) => {
     const tr = document.createElement("tr");
+    tr.id = "r_" + g.gene_id;
     const pmids = (g.pmids || []).slice(0, 6)
       .map((p) => `<a href="https://pubmed.ncbi.nlm.nih.gov/${p}/" target="_blank">${p}</a>`)
       .join(", ") + ((g.pmids || []).length > 6 ? " …" : "");
     const aliases = (g.aliases || []).map((a) => `<span class="pill">${escapeHtml(a)}</span>`).join("");
-    let seqCell;
-    if (g.sequence) {
-      const s = g.sequence;
-      seqCell =
-        `<div>${s.length.toLocaleString()} bp · strand ${s.strand} · ` +
-        `<a href="${s.url}" target="_blank">${s.accession}</a>:${s.region}</div>` +
-        `<button class="seqbtn" onclick="toggleSeq(${i})">Show sequence</button>` +
-        `<div class="seqbox" id="seq${i}">&gt;${escapeHtml(s.header)}\n${chunk(s.sequence)}</div>`;
-    } else {
-      seqCell = `<span class="noseq">no genomic coords / not fetched</span>`;
-    }
     tr.innerHTML =
       `<td><a class="sym" href="${g.gene_url}" target="_blank">${escapeHtml(g.symbol)}</a>` +
       `<div>${aliases}</div></td>` +
@@ -197,24 +285,150 @@ function renderRows() {
       `<td>${g.mention_count}</td>` +
       `<td>${g.paper_count}</td>` +
       `<td>${pmids}</td>` +
-      `<td>${seqCell}</td>`;
+      `<td id="seq_${g.gene_id}">${seqCell(g)}</td>` +
+      `<td id="prot_${g.gene_id}">${protCell(g)}</td>` +
+      `<td id="fn_${g.gene_id}">${fnCell(g)}</td>` +
+      `<td id="homo_${g.gene_id}">${homoCell(g)}</td>`;
     tb.appendChild(tr);
   });
 }
 
-function toggleSeq(i) {
-  const el = $("seq" + i);
+function enrichRow(g) {
+  const set = (pfx, html) => { const el = $(pfx + "_" + g.gene_id); if (el) el.innerHTML = html; };
+  set("seq", seqCell(g));
+  set("prot", protCell(g));
+  set("fn", fnCell(g));
+  set("homo", homoCell(g));
+}
+
+const PENDING = `<span class="spin">resolving…</span>`;
+
+function seqCell(g) {
+  if (g.sequence === null && g.reason === null) return PENDING;  // not enriched yet
+  if (g.sequence) {
+    const s = g.sequence, id = "seqbox_" + g.gene_id;
+    return `<div>${s.length.toLocaleString()} bp · strand ${s.strand} · ` +
+      `<a href="${s.url}" target="_blank">${s.accession}</a>:${s.region}</div>` +
+      `<button class="seqbtn" onclick="toggleBox('${id}')">Show sequence</button>` +
+      `<div class="seqbox" id="${id}">&gt;${escapeHtml(s.header || s.accession)}\n${chunk(s.sequence)}</div>`;
+  }
+  return `<span class="noseq">no sequence</span> ${whyMark(g)}`;
+}
+
+function protCell(g) {
+  if (g.protein === null && g.reason === null) return PENDING;
+  if (g.protein) {
+    const p = g.protein, id = "protbox_" + g.gene_id;
+    const badge = p.reviewed ? `<span class="badge rev">Swiss-Prot</span>`
+                             : `<span class="badge unrev">TrEMBL</span>`;
+    return `<div><a href="${p.url}" target="_blank">${escapeHtml(p.accession)}</a> ${badge}</div>` +
+      `<div class="noseq">${escapeHtml(p.name || "")}</div>` +
+      (p.length ? `<div>${p.length.toLocaleString()} aa · ` +
+        `<button class="seqbtn" onclick="toggleBox('${id}')">Show sequence</button></div>` +
+        `<div class="seqbox" id="${id}">&gt;${escapeHtml(p.accession)} ${escapeHtml(p.name || "")}\n${chunk(p.sequence)}</div>` : "");
+  }
+  return `<span class="noseq">no UniProt match</span>`;
+}
+
+function fnCell(g) {
+  if (!g.protein) return g.protein === null && g.reason === null ? PENDING : `<span class="noseq">—</span>`;
+  const a = g.protein.annotations || {};
+  const bits = [];
+  if ((a.ec || []).length) bits.push(`<div>EC <code>${a.ec.map(escapeHtml).join(", ")}</code></div>`);
+  if (a.families) bits.push(`<div class="noseq">${escapeHtml(a.families)}</div>`);
+  if ((a.keywords || []).length)
+    bits.push(`<div>${a.keywords.slice(0, 6).map((k) => `<span class="pill">${escapeHtml(k)}</span>`).join("")}</div>`);
+  const refs = [];
+  (a.pfam || []).forEach((p) => refs.push(`<a href="https://www.ebi.ac.uk/interpro/entry/pfam/${p.id}/" target="_blank">${escapeHtml(p.id)}</a>`));
+  if ((a.go || []).length) refs.push(`${a.go.length} GO`);
+  if ((a.kegg || []).length) refs.push(`<a href="https://www.genome.jp/dbget-bin/www_bget?${encodeURIComponent(a.kegg[0])}" target="_blank">KEGG</a>`);
+  if (refs.length) bits.push(`<div class="noseq">${refs.join(" · ")}</div>`);
+  return bits.join("") || `<span class="noseq">—</span>`;
+}
+
+function homoCell(g) {
+  if (!g.protein) return g.protein === null && g.reason === null ? PENDING : `<span class="noseq">—</span>`;
+  return `<button class="homobtn" id="hb_${g.gene_id}" ` +
+    `onclick="fetchHomologs('${g.gene_id}')">Find homologues</button>` +
+    `<div class="homobox" id="homobox_${g.gene_id}"></div>`;
+}
+
+function whyMark(g) {
+  if (!g.reason) return "";
+  return `<span class="why" title="${escapeHtml(g.reason)}">why?</span>`;
+}
+
+function toggleBox(id) {
+  const el = $(id);
   el.style.display = el.style.display === "block" ? "none" : "block";
+}
+
+const HOMO_CACHE = {};
+async function fetchHomologs(geneId) {
+  const g = (DATA.genes || []).find((x) => x.gene_id === geneId);
+  if (!g || !g.protein) return;
+  const box = $("homobox_" + geneId);
+  const btn = $("hb_" + geneId);
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const src = $("homoSource").value;
+  const identity = $("homoIdentity").value;
+  const cacheKey = `${src}|${identity}|${g.protein.accession}|${g.protein.name}`;
+  if (HOMO_CACHE[cacheKey]) { box.innerHTML = HOMO_CACHE[cacheKey]; return; }
+  box.innerHTML = `<span class="spin">Looking up homologues…</span>`;
+  btn.disabled = true;
+  try {
+    const params = new URLSearchParams({
+      source: src, limit: "25", identity,
+      accession: g.protein.accession,
+      name: g.protein.name || g.symbol || "",
+      organism: g.organism || "",
+    });
+    const resp = await fetch("/api/homologs?" + params.toString());
+    const data = await resp.json();
+    const list = data.homologs || [];
+    let html;
+    if (!list.length) {
+      html = `<span class="noseq">No homologues found (${escapeHtml(data.message || src)}).</span>`;
+    } else {
+      const rows = list.map((h) => {
+        const acc = h.accession
+          ? `<a href="${h.url}" target="_blank">${escapeHtml(h.accession)}</a>`
+          : escapeHtml(h.gene_id || "");
+        return `<tr><td>${acc}</td><td><i>${escapeHtml(h.organism || "")}</i></td>` +
+          `<td>${escapeHtml(h.protein_name || h.description || "")}</td>` +
+          `<td>${h.length ? h.length + " aa" : ""}</td></tr>`;
+      }).join("");
+      let head;
+      if (data.source === "orthodb") {
+        head = `<div class="noseq">OrthoDB group ` +
+          `<a href="${data.group_url}" target="_blank">${escapeHtml(data.group || "")}</a>` +
+          ` (${escapeHtml(data.group_name || "")}) · ${data.count} members (showing ${list.length})</div>`;
+      } else {
+        const lvl = data.identity === "0.9" ? "90" : data.identity === "1.0" ? "100" : "50";
+        head = `<div class="noseq">UniRef${lvl} cluster ` +
+          `<a href="${data.cluster_url}" target="_blank">${escapeHtml(data.cluster || "")}</a>` +
+          ` · ${data.count} member(s) (showing ${list.length})</div>`;
+      }
+      html = head + `<table>${rows}</table>`;
+    }
+    HOMO_CACHE[cacheKey] = html;
+    box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = `<span class="noseq">❌ ${escapeHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function chunk(seq, n = 70) {
   const out = [];
-  for (let i = 0; i < seq.length; i += n) out.push(seq.slice(i, i + n));
+  for (let i = 0; i < (seq || "").length; i += n) out.push(seq.slice(i, i + n));
   return out.join("\n");
 }
 
 function escapeHtml(s) {
-  return (s || "").replace(/[&<>"']/g, (c) =>
+  return (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
@@ -239,13 +453,29 @@ function exportFasta() {
   download("genes.fasta", parts.join("\n") + "\n");
 }
 
+function exportProtFasta() {
+  const parts = [];
+  (DATA.genes || []).forEach((g) => {
+    if (!g.protein || !g.protein.sequence) return;
+    const p = g.protein;
+    parts.push(`>${g.symbol}|${p.accession}|${g.organism}|${p.name}`);
+    parts.push(chunk(p.sequence));
+  });
+  if (!parts.length) { setStatus("No protein sequences to export."); return; }
+  download("proteins.fasta", parts.join("\n") + "\n");
+}
+
 function exportCsv() {
-  const rows = [["symbol", "gene_id", "organism", "description", "mentions", "papers", "seq_accession", "seq_region", "seq_strand", "seq_length_bp", "gene_url", "pmids"]];
+  const rows = [["symbol", "gene_id", "organism", "description", "mentions", "papers", "seq_accession", "seq_region", "seq_strand", "seq_length_bp", "uniprot_accession", "uniprot_reviewed", "protein_name", "protein_length_aa", "ec", "gene_url", "pmids"]];
   (DATA.genes || []).forEach((g) => {
     const s = g.sequence || {};
+    const p = g.protein || {};
+    const a = (p.annotations || {});
     rows.push([
       g.symbol, g.gene_id, g.organism, g.description, g.mention_count, g.paper_count,
       s.accession || "", s.region || "", s.strand || "", s.length || "",
+      p.accession || "", p.reviewed ? "yes" : (g.protein ? "no" : ""), p.name || "", p.length || "",
+      (a.ec || []).join(" "),
       g.gene_url, (g.pmids || []).join(" "),
     ]);
   });
@@ -253,16 +483,42 @@ function exportCsv() {
   download("genes.csv", csv, "text/csv");
 }
 
+async function exportBundle() {
+  if (!DATA || !(DATA.genes || []).length) { setStatus("Nothing to bundle yet."); return; }
+  setStatus("Building zip…");
+  try {
+    const resp = await fetch("/api/bundle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: DATA.query || "", organism: DATA.organism || "", genes: DATA.genes }),
+    });
+    if (!resp.ok) throw new Error("Server " + resp.status);
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (DATA.query || "genes").replace(/[^a-z0-9]+/gi, "_").slice(0, 40) + "_bundle.zip";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    setStatus("");
+  } catch (e) {
+    setStatus("❌ Bundle failed: " + e.message);
+  }
+}
+
 document.querySelectorAll("th[data-k]").forEach((th) => {
   th.addEventListener("click", () => {
     const k = th.dataset.k;
     if (sortKey === k) sortDir *= -1;
-    else { sortKey = k; sortDir = (typeof (DATA.genes[0] || {})[k] === "string") ? 1 : -1; }
+    else { sortKey = k; sortDir = (typeof ((DATA.genes[0] || {})[k]) === "string") ? 1 : -1; }
     renderRows();
   });
 });
 
 $("go").addEventListener("click", runSearch);
+$("exportFasta").addEventListener("click", exportFasta);
+$("exportProtFasta").addEventListener("click", exportProtFasta);
+$("exportCsv").addEventListener("click", exportCsv);
+$("exportBundle").addEventListener("click", exportBundle);
 ["query", "organism", "maxPapers", "minMentions"].forEach((id) =>
   $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); }));
 </script>
