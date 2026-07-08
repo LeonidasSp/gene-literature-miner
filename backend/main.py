@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 
 from bvbrc import BVBRCClient
 from cache import Cache
+from ensembl import EnsemblClient
 from europepmc import EuropePMCClient
 from ncbi import NCBIClient, is_locus_tag
 from orthodb import OrthoDBClient
@@ -53,6 +54,7 @@ europepmc: EuropePMCClient
 orthodb: OrthoDBClient
 bvbrc: BVBRCClient
 wormbase: WormBaseParasiteClient
+ensembl: EnsemblClient
 cache: Cache
 _search_gate = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
 _last_seen: dict[str, float] = {}
@@ -60,7 +62,7 @@ _last_seen: dict[str, float] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client, uniprot, europepmc, orthodb, bvbrc, wormbase, cache
+    global client, uniprot, europepmc, orthodb, bvbrc, wormbase, ensembl, cache
     cache = Cache()
     client = NCBIClient()
     uniprot = UniProtClient(cache=cache)
@@ -68,6 +70,7 @@ async def lifespan(app: FastAPI):
     orthodb = OrthoDBClient()
     bvbrc = BVBRCClient(cache=cache)
     wormbase = WormBaseParasiteClient(cache=cache)
+    ensembl = EnsemblClient(cache=cache)
     try:
         yield
     finally:
@@ -77,6 +80,7 @@ async def lifespan(app: FastAPI):
         await orthodb.aclose()
         await bvbrc.aclose()
         await wormbase.aclose()
+        await ensembl.aclose()
         cache.close()
 
 
@@ -109,6 +113,7 @@ class SearchRequest(BaseModel):
     min_mentions: int = Field(1, ge=1, description="Keep genes mentioned at least this many times")
     max_genes_with_sequence: int = Field(30, ge=1, le=100)
     source: str = Field("pubmed", description="Literature source: pubmed | europepmc | both")
+    full_text: bool = Field(True, description="Mine full text of open-access papers, not just abstracts")
 
 
 def _build_term(query: str, organism: str) -> str:
@@ -162,7 +167,7 @@ async def _collect_genes(
     if not pmids:
         return [], term, 0, "No articles matched this query."
 
-    raw_genes = await client.genes_from_pubtator(pmids)
+    raw_genes = await client.genes_from_pubtator(pmids, full_text=req.full_text)
     if not raw_genes:
         return [], term, len(pmids), (
             "Articles found, but PubTator returned no gene annotations."
@@ -203,6 +208,7 @@ async def _collect_genes(
                 "aliases": sorted(entry["mentions"], key=lambda k: -entry["mentions"][k])[:5],
                 "description": description,
                 "organism": organism,
+                "taxid": str((summ.get("organism") or {}).get("taxid") or ""),
                 "mention_count": entry["count"],
                 "paper_count": len(entry["pmids"]),
                 "pmids": sorted(entry["pmids"], key=int, reverse=True),
@@ -270,11 +276,15 @@ async def _fallback_sequence(
     g: dict[str, Any], req: SearchRequest
 ) -> Optional[dict[str, Any]]:
     """
-    Try organism-specific nucleotide databases when NCBI has nothing.
+    Try the most authoritative organism-specific nucleotide database when NCBI
+    has nothing, routed by the organism's taxonomic lineage:
 
-    Routes by organism: helminth parasites -> WormBase ParaSite; everything else
-    (bacteria, viruses, and as a general fallback) -> BV-BRC. New sources can be
-    added to this router without touching the rest of the pipeline.
+      bacteria / viruses / archaea  -> BV-BRC
+      parasitic helminths           -> WormBase ParaSite (then Ensembl)
+      other eukaryotes              -> Ensembl (plants=TAIR, fungi=SGD,
+                                        insects=FlyBase, vertebrates, protists)
+
+    The router is table-driven, so more databases can be slotted in per clade.
     """
     organism = g.get("organism") or req.organism
     if not organism.strip():
@@ -282,22 +292,47 @@ async def _fallback_sequence(
     gene = g.get("ncbi_name") or g.get("symbol") or ""
     if is_locus_tag(gene):  # a locus tag is a poor cross-database key
         gene = g.get("symbol") or ""
+    symbol = g.get("symbol") or gene
     name = g.get("description") or g.get("symbol") or ""
 
-    if is_helminth(organism):
-        try:
-            seq = await wormbase.fetch_sequence(
-                symbol=g.get("symbol") or gene, name=name, organism=organism
-            )
-        except Exception:
-            seq = None
-        if seq:
-            return seq
-
     try:
-        return await bvbrc.fetch_sequence(gene=gene, name=name, organism=organism)
+        lineage = await client.lineage(g.get("taxid", ""))
     except Exception:
-        return None
+        lineage = ""
+    group = _classify(lineage, organism)
+
+    async def _try(coro):
+        try:
+            return await coro
+        except Exception:
+            return None
+
+    if group in ("bacteria", "virus", "archaea"):
+        return await _try(bvbrc.fetch_sequence(gene=gene, name=name, organism=organism))
+
+    if group == "helminth":
+        seq = await _try(wormbase.fetch_sequence(symbol=symbol, name=name, organism=organism))
+        return seq or await _try(
+            ensembl.fetch_sequence(symbol=symbol, name=name, organism=organism)
+        )
+
+    # Any other eukaryote (plant, fungus, vertebrate, insect, protist, …).
+    return await _try(ensembl.fetch_sequence(symbol=symbol, name=name, organism=organism))
+
+
+def _classify(lineage: str, organism: str) -> str:
+    """Map an NCBI lineage string to a source-routing group."""
+    lin = (lineage or "").lower()
+    org = (organism or "").lower()
+    if "viruses" in lin:
+        return "virus"
+    if "bacteria" in lin:
+        return "bacteria"
+    if "archaea" in lin:
+        return "archaea"
+    if "nematoda" in lin or "platyhelminthes" in lin or is_helminth(org):
+        return "helminth"
+    return "eukaryote"
 
 
 def _reason(seq: Optional[dict], protein: Optional[dict]) -> Optional[str]:
@@ -354,13 +389,14 @@ async def search_stream(
     min_mentions: int = 1,
     max_genes_with_sequence: int = 30,
     source: str = "pubmed",
+    full_text: bool = True,
 ) -> StreamingResponse:
     """Server-Sent Events: emit gene metadata first, then enrich row-by-row."""
     req = SearchRequest(
         query=query, organism=organism, max_papers=max(1, min(max_papers, 200)),
         min_mentions=max(1, min_mentions),
         max_genes_with_sequence=max(1, min(max_genes_with_sequence, 100)),
-        source=source,
+        source=source, full_text=full_text,
     )
 
     async def gen():

@@ -14,17 +14,32 @@ GO/Pfam/KEGG annotation, and homologues across related species.
 | Step | Source | What it does |
 |------|--------|--------------|
 | 1. Literature search | **PubMed** and/or **Europe PMC** | Finds articles matching your topic (+ optional organism). |
-| 2. Gene extraction | **PubTator3** (NCBI) | Reads the abstracts and maps gene mentions to NCBI Gene IDs. |
+| 2. Gene extraction | **PubTator3** (NCBI) | Annotates each paper's abstract — or its **full text** for open-access papers — and maps gene mentions to NCBI Gene IDs. |
 | 3. Metadata + filter | **NCBI Gene** (`esummary`) | Adds official symbol/description/organism; drops off-organism hits. |
-| 4. Nucleotide | **NCBI**, then **BV-BRC** / **WormBase ParaSite** | Fetches the gene sequence, falling back to organism-specific databases when NCBI has no record. |
+| 4. Nucleotide | **NCBI**, then an organism-specific database | Fetches the gene sequence, falling back to the authoritative database for that organism when NCBI has no record. |
 | 5. Protein + annotation | **UniProt** | Amino-acid sequence + EC / keywords / GO / Pfam / KEGG. |
 | 6. Orthologues (on demand) | **OrthoDB** | Cross-species orthologues from the gene's OrthoDB ortholog group. |
 
-Nucleotide sequences are not tied to NCBI alone: if NCBI has no usable record,
-the tool automatically tries an organism-specific database — **BV-BRC** for
-bacteria and viruses, **WormBase ParaSite** for parasitic helminths — which
-often has the gene NCBI is missing. Each sequence is labelled with the database
-it came from. The router is pluggable, so more organism databases can be added.
+**Full-text mining:** for papers in PMC's open-access subset, PubTator annotates
+the whole article rather than just the abstract, which surfaces noticeably more
+genes. Paywalled papers are still covered at the abstract level. Toggle it off in
+the search form for faster, abstract-only runs.
+
+**Organism-specific nucleotide sources:** if NCBI has no usable record, the tool
+routes to the database of record for that organism (by NCBI taxonomic lineage)
+and labels each sequence with its source:
+
+| Organism group | Database used |
+|----------------|---------------|
+| Bacteria, viruses, archaea | **BV-BRC** |
+| Parasitic helminths (nematodes, flatworms) | **WormBase ParaSite** |
+| Plants (incl. *Arabidopsis* → TAIR10) | **Ensembl Plants** |
+| Fungi (incl. budding yeast → SGD) | **Ensembl Fungi** |
+| Insects (incl. *Drosophila* → FlyBase) | **Ensembl Metazoa** |
+| Vertebrates (human, mouse, zebrafish, …) | **Ensembl** |
+| Other protists / eukaryotes | **Ensembl** |
+
+The router is table-driven, so more organism databases can be slotted in per clade.
 
 Results **stream in gene-by-gene**, so the table appears immediately and fills as
 each gene resolves. Every data source is free and needs no key.
@@ -74,13 +89,13 @@ per gene (OrthoDB). Export buttons:
 ## Notes & limits
 
 - **Nucleotide sequences** come from NCBI first (exact gene region on the correct
-  strand); if NCBI has no usable record the tool falls back to BV-BRC (bacteria /
-  viruses) or WormBase ParaSite (helminths). Genes that no database can resolve
-  are shown with a **why?** tooltip explaining the cause.
-- **PubTator coverage** is per-abstract and can be sparse — raise *Max papers*
-  to surface more genes.
+  strand); if NCBI has no usable record the tool falls back to the organism's
+  database of record (see the table above). Genes that no database can resolve are
+  shown with a **why?** tooltip explaining the cause.
+- **Gene recall** depends on PubTator coverage; raise *Max papers* and keep
+  full-text mining on to surface more genes.
 - **Orthologues** are OrthoDB ortholog groups (evolutionary orthology), scoped to
   the organism's taxonomic level where possible.
 - The literature and sequence layers (`backend/ncbi.py`, `backend/europepmc.py`,
-  `backend/bvbrc.py`, `backend/wormbase.py`) are isolated, so further databases
-  can be plugged in without touching the rest of the pipeline.
+  `backend/bvbrc.py`, `backend/wormbase.py`, `backend/ensembl.py`) are isolated,
+  so further databases can be plugged in without touching the rest of the pipeline.

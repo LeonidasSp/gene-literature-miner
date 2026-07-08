@@ -108,6 +108,12 @@
       </div>
       <button id="go">Search</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <label style="display:flex; align-items:center; gap:7px; margin:0; cursor:pointer; font-size:13px; color:var(--text)">
+        <input type="checkbox" id="fullText" checked style="width:16px; height:16px; accent-color:var(--accent)" />
+        Mine full text of open-access papers (more genes; a little slower)
+      </label>
+    </div>
     <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code>) keeps only genes whose NCBI Gene record matches that species. Results stream in as each gene resolves.</div>
   </div>
 
@@ -171,6 +177,7 @@ function runSearch() {
     min_mentions: parseInt($("minMentions").value) || 1,
     max_genes_with_sequence: 30,
     source: $("source").value,
+    full_text: $("fullText").checked,
   });
   const es = new EventSource("/api/search/stream?" + params.toString());
   ES = es;

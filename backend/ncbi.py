@@ -49,6 +49,7 @@ class NCBIClient:
             headers={"User-Agent": f"{TOOL_NAME} (mailto:{CONTACT_EMAIL})"},
         )
         self._limiter = RateLimiter(_MIN_INTERVAL)
+        self._tax_cache: dict[str, str] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -91,15 +92,25 @@ class NCBIClient:
         return data.get("esearchresult", {}).get("idlist", [])
 
     # --------------------------------------------------------------- PubTator3
-    async def genes_from_pubtator(self, pmids: list[str]) -> dict[str, dict[str, Any]]:
+    async def genes_from_pubtator(
+        self, pmids: list[str], *, full_text: bool = False
+    ) -> dict[str, dict[str, Any]]:
         """
         Return {gene_id: {"mentions": set(text), "pmids": set(pmid), "count": int}}
         by asking PubTator3 for gene annotations on the given PMIDs.
+
+        When `full_text` is set, PubTator annotates the full body of any article
+        available in PMC's open-access subset (not just the abstract), which
+        surfaces more genes; paywalled articles still fall back to their abstract.
+        Full-text responses are much larger, so they are fetched in smaller batches.
         """
         genes: dict[str, dict[str, Any]] = {}
-        for i in range(0, len(pmids), 100):
-            batch = pmids[i : i + 100]
+        batch_size = 20 if full_text else 100
+        for i in range(0, len(pmids), batch_size):
+            batch = pmids[i : i + batch_size]
             params = {"pmids": ",".join(batch)}
+            if full_text:
+                params["full"] = "true"
             try:
                 resp = await self._get(
                     f"{PUBTATOR}/publications/export/biocjson", params
@@ -146,6 +157,30 @@ class NCBIClient:
             for uid in result.get("uids", []):
                 out[uid] = result[uid]
         return out
+
+    async def lineage(self, taxid: str) -> str:
+        """Full taxonomic lineage string for a taxid (cached), for source routing."""
+        taxid = str(taxid or "").strip()
+        if not taxid:
+            return ""
+        if taxid in self._tax_cache:
+            return self._tax_cache[taxid]
+        params = {**self._common(), "db": "taxonomy", "id": taxid, "retmode": "xml"}
+        try:
+            resp = await self._get(f"{EUTILS}/efetch.fcgi", params)
+        except RuntimeError:
+            return ""
+        text = resp.text
+        lin = ""
+        m = re.search(r"<Lineage>(.*?)</Lineage>", text, re.DOTALL)
+        if m:
+            lin = m.group(1).strip()
+        # Append the taxon's own name so single-rank checks still work.
+        n = re.search(r"<ScientificName>(.*?)</ScientificName>", text, re.DOTALL)
+        if n:
+            lin = f"{lin}; {n.group(1).strip()}"
+        self._tax_cache[taxid] = lin
+        return lin
 
     async def search_gene_db(self, term: str, retmax: int = 20) -> list[str]:
         params = {
