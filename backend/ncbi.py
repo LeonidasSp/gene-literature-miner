@@ -242,6 +242,7 @@ class NCBIClient:
             "header": header,
             "sequence": seq,
             "url": f"https://www.ncbi.nlm.nih.gov/nuccore/{chraccver}",
+            "database": "NCBI",
         }
 
 

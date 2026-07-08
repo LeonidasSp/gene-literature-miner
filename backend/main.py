@@ -32,11 +32,13 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from bvbrc import BVBRCClient
 from cache import Cache
 from europepmc import EuropePMCClient
 from ncbi import NCBIClient, is_locus_tag
 from orthodb import OrthoDBClient
 from uniprot import UniProtClient
+from wormbase import WormBaseParasiteClient, is_helminth
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -49,6 +51,8 @@ client: NCBIClient
 uniprot: UniProtClient
 europepmc: EuropePMCClient
 orthodb: OrthoDBClient
+bvbrc: BVBRCClient
+wormbase: WormBaseParasiteClient
 cache: Cache
 _search_gate = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
 _last_seen: dict[str, float] = {}
@@ -56,12 +60,14 @@ _last_seen: dict[str, float] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client, uniprot, europepmc, orthodb, cache
+    global client, uniprot, europepmc, orthodb, bvbrc, wormbase, cache
     cache = Cache()
     client = NCBIClient()
     uniprot = UniProtClient(cache=cache)
     europepmc = EuropePMCClient()
     orthodb = OrthoDBClient()
+    bvbrc = BVBRCClient(cache=cache)
+    wormbase = WormBaseParasiteClient(cache=cache)
     try:
         yield
     finally:
@@ -69,6 +75,8 @@ async def lifespan(app: FastAPI):
         await uniprot.aclose()
         await europepmc.aclose()
         await orthodb.aclose()
+        await bvbrc.aclose()
+        await wormbase.aclose()
         cache.close()
 
 
@@ -221,13 +229,17 @@ async def _enrich_gene(g: dict[str, Any], req: SearchRequest) -> dict[str, Any]:
 
     async def _seq() -> Optional[dict[str, Any]]:
         try:
-            return await client.resolve_sequence(
+            seq = await client.resolve_sequence(
                 summary=g["_summary"],
                 candidate_symbols=g["_candidates"],
                 organism=req.organism,
             )
         except Exception:
-            return None
+            seq = None
+        if seq:
+            return seq
+        # NCBI came up empty — try an organism-specific database.
+        return await _fallback_sequence(g, req)
 
     async def _prot() -> Optional[dict[str, Any]]:
         try:
@@ -254,13 +266,47 @@ async def _enrich_gene(g: dict[str, Any], req: SearchRequest) -> dict[str, Any]:
     }
 
 
+async def _fallback_sequence(
+    g: dict[str, Any], req: SearchRequest
+) -> Optional[dict[str, Any]]:
+    """
+    Try organism-specific nucleotide databases when NCBI has nothing.
+
+    Routes by organism: helminth parasites -> WormBase ParaSite; everything else
+    (bacteria, viruses, and as a general fallback) -> BV-BRC. New sources can be
+    added to this router without touching the rest of the pipeline.
+    """
+    organism = g.get("organism") or req.organism
+    if not organism.strip():
+        return None
+    gene = g.get("ncbi_name") or g.get("symbol") or ""
+    if is_locus_tag(gene):  # a locus tag is a poor cross-database key
+        gene = g.get("symbol") or ""
+    name = g.get("description") or g.get("symbol") or ""
+
+    if is_helminth(organism):
+        try:
+            seq = await wormbase.fetch_sequence(
+                symbol=g.get("symbol") or gene, name=name, organism=organism
+            )
+        except Exception:
+            seq = None
+        if seq:
+            return seq
+
+    try:
+        return await bvbrc.fetch_sequence(gene=gene, name=name, organism=organism)
+    except Exception:
+        return None
+
+
 def _reason(seq: Optional[dict], protein: Optional[dict]) -> Optional[str]:
     """Explain a missing sequence/protein rather than showing a bare blank."""
     notes = []
     if not seq:
         notes.append(
-            "no nucleotide sequence (record lacks genomic coordinates or the "
-            "literature name didn't resolve to an NCBI Gene record)"
+            "no nucleotide sequence (not found in NCBI or the organism-specific "
+            "databases, usually a naming/vocabulary mismatch)"
         )
     if not protein:
         notes.append(
@@ -349,33 +395,17 @@ async def search_stream(
 # ------------------------------------------------------------------- homologues
 @app.get("/api/homologs")
 async def homologs(
-    accession: str = "",
-    limit: int = 25,
-    identity: str = "0.5",
-    source: str = "uniref",
     name: str = "",
     organism: str = "",
+    limit: int = 25,
 ) -> dict[str, Any]:
-    """
-    Cross-species homologues.
-
-    source=uniref  -> the protein's UniRef cluster (needs `accession`); `identity`
-                      selects UniRef50/90/100 (0.5 / 0.9 / 1.0).
-    source=orthodb -> OrthoDB ortholog group (needs `name` + `organism`).
-    """
+    """Cross-species orthologues from OrthoDB (ortholog group for a gene name)."""
     limit = max(1, min(limit, 50))
     try:
-        if source.lower() == "orthodb":
-            result = await orthodb.orthologs(name=name, organism=organism, limit=limit)
-            result["source"] = "orthodb"
-        else:
-            result = await uniprot.homologs_for_protein(
-                accession.strip(), limit=limit, identity=identity
-            )
-            result["source"] = "uniref"
+        result = await orthodb.orthologs(name=name, organism=organism, limit=limit)
     except Exception:
-        return {"homologs": [], "message": "Homologue lookup failed.", "source": source}
-    result["accession"] = accession
+        return {"homologs": [], "message": "Orthologue lookup failed.", "source": "orthodb"}
+    result["source"] = "orthodb"
     return result
 
 
@@ -420,9 +450,13 @@ def _nucleotide_fasta(genes: list[dict[str, Any]]) -> str:
         s = g.get("sequence")
         if not s:
             continue
+        loc = (
+            f"{s.get('accession')}:{s.get('region')}({s.get('strand')})"
+            if s.get("region") else f"{s.get('accession')}"
+        )
         parts.append(
             f">{g.get('symbol')}|GeneID:{g.get('gene_id')}|{g.get('organism')}"
-            f"|{s.get('accession')}:{s.get('region')}({s.get('strand')})"
+            f"|{loc}|{s.get('database', 'NCBI')}"
         )
         parts.append(_wrap(s.get("sequence", "")))
     return "\n".join(parts) + ("\n" if parts else "")
@@ -446,7 +480,7 @@ def _genes_csv(genes: list[dict[str, Any]]) -> str:
     w = csv.writer(out)
     w.writerow([
         "symbol", "gene_id", "organism", "description", "mentions", "papers",
-        "seq_accession", "seq_region", "seq_strand", "seq_length_bp",
+        "seq_database", "seq_accession", "seq_region", "seq_strand", "seq_length_bp",
         "uniprot_accession", "uniprot_reviewed", "protein_name", "protein_length_aa",
         "gene_url", "pmids",
     ])
@@ -456,7 +490,8 @@ def _genes_csv(genes: list[dict[str, Any]]) -> str:
         w.writerow([
             g.get("symbol"), g.get("gene_id"), g.get("organism"), g.get("description"),
             g.get("mention_count"), g.get("paper_count"),
-            s.get("accession", ""), s.get("region", ""), s.get("strand", ""), s.get("length", ""),
+            s.get("database", ""), s.get("accession", ""), s.get("region", ""),
+            s.get("strand", ""), s.get("length", ""),
             p.get("accession", ""), "yes" if p.get("reviewed") else ("no" if p else ""),
             p.get("name", ""), p.get("length", ""),
             g.get("gene_url"), " ".join(g.get("pmids") or []),

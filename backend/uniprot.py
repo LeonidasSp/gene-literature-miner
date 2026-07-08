@@ -1,13 +1,10 @@
 """
 UniProt REST client for the Gene Literature Miner.
 
-Two capabilities, kept isolated from the NCBI layer so either can evolve
-independently:
-
-  * `protein_for_gene`  — map an NCBI Gene ID (falling back to symbol +
-    organism) to the best UniProtKB entry and return its amino-acid sequence.
-  * `homologs_for_protein` — from a UniProt accession, find its UniRef50
-    cluster and return the cluster members as cross-species homologues.
+Kept isolated from the NCBI layer. `protein_for_gene` maps an NCBI Gene ID
+(falling back to symbol/description + organism) to the best UniProtKB entry and
+returns its amino-acid sequence plus functional annotation (EC, keywords, GO,
+Pfam, KEGG). Orthologues are handled separately by the OrthoDB client.
 
 UniProt's REST API needs no key. We stay polite with a small rate limiter and
 the same retry/back-off shape as the NCBI client.
@@ -22,15 +19,12 @@ from typing import Any, Optional
 import httpx
 
 UNIPROTKB = "https://rest.uniprot.org/uniprotkb"
-UNIREF = "https://rest.uniprot.org/uniref"
 
 CONTACT_EMAIL = os.environ.get("NCBI_EMAIL", "le.spathis@gmail.com")
 TOOL_NAME = "gene-literature-miner"
 
 # UniProt tolerates bursts, but be a good citizen from a shared server IP.
 _MIN_INTERVAL = 0.15
-# UniRef identity used to define "homologue" (0.5 = UniRef50, broad; 0.9 tighter).
-HOMOLOG_IDENTITY = os.environ.get("UNIREF_IDENTITY", "0.5")
 
 
 class _RateLimiter:
@@ -52,9 +46,6 @@ _PROTEIN_FIELDS = (
     "accession,id,protein_name,organism_name,length,sequence,reviewed,"
     "ec,keyword,go_id,xref_pfam,xref_kegg,protein_families"
 )
-
-# UniRef identity presets the UI exposes.
-_IDENTITY_MAP = {"0.5": "50", "0.9": "90", "1.0": "100"}
 
 
 class UniProtClient:
@@ -153,124 +144,6 @@ class UniProtClient:
             results[0],
         )
         return _parse_protein(best)
-
-    # -------------------------------------------------------------- homologues
-    async def homologs_for_protein(
-        self, accession: str, *, limit: int = 25, identity: str = HOMOLOG_IDENTITY
-    ) -> dict[str, Any]:
-        """
-        Cross-species homologues via the protein's UniRef cluster.
-
-        `identity` selects the cluster tightness: "0.5" (UniRef50, broad),
-        "0.9" (UniRef90), or "1.0" (UniRef100). Returns
-        {"cluster": ..., "identity": ..., "count": N, "homologs": [...]}.
-        """
-        identity = identity if identity in _IDENTITY_MAP else HOMOLOG_IDENTITY
-        if self._cache is not None:
-            cached = await self._cache.get("uniref", f"{accession}:{identity}")
-            if cached is not None:
-                return cached
-
-        cluster = await self._uniref_cluster(accession, identity)
-        if not cluster:
-            result = {"cluster": None, "homologs": [], "identity": identity}
-        else:
-            members = await self._uniref_members(cluster, limit=limit + 5)
-            homologs = [m for m in members if accession not in m.get("_accessions", [])]
-            for m in homologs:
-                m.pop("_accessions", None)
-            result = {
-                "cluster": cluster,
-                "cluster_url": f"https://www.uniprot.org/uniref/{cluster}",
-                "identity": identity,
-                "count": len(homologs),
-                "homologs": homologs[:limit],
-            }
-        if self._cache is not None:
-            await self._cache.set("uniref", f"{accession}:{identity}", result)
-        return result
-
-    async def _uniref_cluster(self, accession: str, identity: str) -> Optional[str]:
-        cluster = await self._uniref_query(f"uniprot_id:{accession}", identity)
-        if cluster:
-            return cluster
-        # The accession may have been demerged; UniRef suggests a replacement.
-        alt = await self._suggested_accession(accession, identity)
-        if alt:
-            return await self._uniref_query(f"uniprot_id:{alt}", identity)
-        return None
-
-    async def _uniref_query(self, member_clause: str, identity: str) -> Optional[str]:
-        params = {
-            "query": f"{member_clause} AND identity:{identity}",
-            "format": "json",
-            "fields": "id",
-            "size": "1",
-        }
-        resp = await self._get(f"{UNIREF}/search", params)
-        if resp is None:
-            return None
-        try:
-            results = resp.json().get("results", [])
-        except ValueError:
-            return None
-        return results[0].get("id") if results else None
-
-    async def _suggested_accession(self, accession: str, identity: str) -> Optional[str]:
-        params = {
-            "query": f"uniprot_id:{accession} AND identity:{identity}",
-            "format": "json",
-            "fields": "id",
-            "size": "1",
-        }
-        resp = await self._get(f"{UNIREF}/search", params)
-        if resp is None:
-            return None
-        try:
-            suggestions = resp.json().get("suggestions", [])
-        except ValueError:
-            return None
-        for s in suggestions:
-            q = str(s.get("query", ""))
-            # e.g. "uniprotkb:q5fvf1 identity:0.5" -> q5fvf1
-            for tok in q.split():
-                if tok.lower().startswith("uniprotkb:"):
-                    return tok.split(":", 1)[1].upper()
-        return None
-
-    async def _uniref_members(self, cluster: str, *, limit: int) -> list[dict[str, Any]]:
-        params = {
-            "format": "json",
-            "size": str(min(limit, 50)),
-            "facetFilter": "member_id_type:uniprotkb_id",
-        }
-        resp = await self._get(f"{UNIREF}/{cluster}/members", params)
-        if resp is None:
-            return []
-        try:
-            results = resp.json().get("results", [])
-        except ValueError:
-            return []
-        out: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        for m in results:
-            accs = m.get("accessions") or []
-            acc = accs[0] if accs else m.get("memberId", "")
-            if not acc or acc in seen:
-                continue
-            seen.add(acc)
-            out.append(
-                {
-                    "accession": acc,
-                    "id": m.get("memberId", ""),
-                    "protein_name": m.get("proteinName", ""),
-                    "organism": m.get("organismName", ""),
-                    "length": m.get("sequenceLength"),
-                    "url": f"https://www.uniprot.org/uniprotkb/{acc}",
-                    "_accessions": accs,
-                }
-            )
-        return out
 
 
 def _parse_protein(r: dict[str, Any]) -> Optional[dict[str, Any]]:

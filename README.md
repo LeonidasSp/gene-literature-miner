@@ -16,9 +16,15 @@ GO/Pfam/KEGG annotation, and homologues across related species.
 | 1. Literature search | **PubMed** and/or **Europe PMC** | Finds articles matching your topic (+ optional organism). |
 | 2. Gene extraction | **PubTator3** (NCBI) | Reads the abstracts and maps gene mentions to NCBI Gene IDs. |
 | 3. Metadata + filter | **NCBI Gene** (`esummary`) | Adds official symbol/description/organism; drops off-organism hits. |
-| 4. Nucleotide | **NCBI Nucleotide** (`efetch`) | Fetches the exact gene region on the correct strand as FASTA. |
+| 4. Nucleotide | **NCBI**, then **BV-BRC** / **WormBase ParaSite** | Fetches the gene sequence, falling back to organism-specific databases when NCBI has no record. |
 | 5. Protein + annotation | **UniProt** | Amino-acid sequence + EC / keywords / GO / Pfam / KEGG. |
-| 6. Homologues (on demand) | **UniRef** or **OrthoDB** | Cross-species homologues by sequence cluster or ortholog group. |
+| 6. Orthologues (on demand) | **OrthoDB** | Cross-species orthologues from the gene's OrthoDB ortholog group. |
+
+Nucleotide sequences are not tied to NCBI alone: if NCBI has no usable record,
+the tool automatically tries an organism-specific database — **BV-BRC** for
+bacteria and viruses, **WormBase ParaSite** for parasitic helminths — which
+often has the gene NCBI is missing. Each sequence is labelled with the database
+it came from. The router is pluggable, so more organism databases can be added.
 
 Results **stream in gene-by-gene**, so the table appears immediately and fills as
 each gene resolves. Every data source is free and needs no key.
@@ -53,13 +59,13 @@ Enter a **topic** (e.g. `biofilm formation`), optionally an **organism**
 | Literature source | `PubMed`, `Europe PMC`, or `Both` (Europe PMC adds preprints + full text). |
 | Max papers | How many articles to scan (higher surfaces more genes; try 100–200). |
 | Min mentions | Drop genes mentioned fewer than this many times. |
-| Homologues | Choose `UniRef50/90/100` (sequence identity) or `OrthoDB` (orthology). |
 
 ## Output
 
 A sortable table of genes with the literature aliases, PMIDs, nucleotide and
-protein sequences, a **Function** column (EC / family / keywords / Pfam / GO /
-KEGG), and a **Find homologues** expander per gene. Export buttons:
+protein sequences (each labelled with its source database), a **Function** column
+(EC / family / keywords / Pfam / GO / KEGG), and a **Find orthologues** expander
+per gene (OrthoDB). Export buttons:
 
 - **Nucleotide FASTA** / **Protein FASTA**
 - **CSV** (gene + sequence + protein summary)
@@ -67,13 +73,14 @@ KEGG), and a **Find homologues** expander per gene. Export buttons:
 
 ## Notes & limits
 
-- **Sequences** come from the gene's genomic coordinates (exact region/strand);
-  records without coordinates, or regions over 60 kb, are shown without a
-  nucleotide sequence but keep their Gene-page link. A **why?** tooltip explains
-  any missing sequence or protein.
+- **Nucleotide sequences** come from NCBI first (exact gene region on the correct
+  strand); if NCBI has no usable record the tool falls back to BV-BRC (bacteria /
+  viruses) or WormBase ParaSite (helminths). Genes that no database can resolve
+  are shown with a **why?** tooltip explaining the cause.
 - **PubTator coverage** is per-abstract and can be sparse — raise *Max papers*
   to surface more genes.
-- **Homologues:** UniRef clusters group by sequence identity; OrthoDB groups by
-  evolutionary orthology (often the better cross-species set).
-- The literature layer (`backend/ncbi.py`, `backend/europepmc.py`) is isolated,
-  so further sources can be added without touching the sequence code.
+- **Orthologues** are OrthoDB ortholog groups (evolutionary orthology), scoped to
+  the organism's taxonomic level where possible.
+- The literature and sequence layers (`backend/ncbi.py`, `backend/europepmc.py`,
+  `backend/bvbrc.py`, `backend/wormbase.py`) are isolated, so further databases
+  can be plugged in without touching the rest of the pipeline.

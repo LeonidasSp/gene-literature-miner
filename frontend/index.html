@@ -58,6 +58,7 @@
            font-weight: 700; vertical-align: middle; }
   .badge.rev { background: rgba(52,211,153,.15); color: var(--accent2); border: 1px solid var(--accent2); }
   .badge.unrev { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
+  .badge.src { background: rgba(56,189,248,.13); color: var(--accent); border: 1px solid var(--accent); cursor: help; }
   .seqbox { display: none; background: #0b1220; border: 1px solid var(--border); border-radius: 8px;
             padding: 10px; margin-top: 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
             font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
@@ -120,18 +121,7 @@
       <button class="ghost" id="exportProtFasta">⬇ Protein FASTA</button>
       <button class="ghost" id="exportCsv">⬇ CSV</button>
       <button class="ghost" id="exportBundle">⬇ Download all (zip)</button>
-      <span class="ctl">
-        Homologues:
-        <select id="homoSource">
-          <option value="uniref">UniRef (identity)</option>
-          <option value="orthodb">OrthoDB (orthologs)</option>
-        </select>
-        <select id="homoIdentity">
-          <option value="0.5">UniRef50</option>
-          <option value="0.9">UniRef90</option>
-          <option value="1.0">UniRef100</option>
-        </select>
-      </span>
+      <span class="ctl">Orthologues via <b>OrthoDB</b></span>
     </div>
     <div style="overflow:auto; max-height:70vh">
       <table id="table">
@@ -146,7 +136,7 @@
             <th>Nucleotide sequence</th>
             <th>Protein (UniProt)</th>
             <th>Function</th>
-            <th>Homologues</th>
+            <th>Orthologues</th>
           </tr>
         </thead>
         <tbody id="tbody"></tbody>
@@ -307,8 +297,13 @@ function seqCell(g) {
   if (g.sequence === null && g.reason === null) return PENDING;  // not enriched yet
   if (g.sequence) {
     const s = g.sequence, id = "seqbox_" + g.gene_id;
-    return `<div>${s.length.toLocaleString()} bp · strand ${s.strand} · ` +
-      `<a href="${s.url}" target="_blank">${s.accession}</a>:${s.region}</div>` +
+    const loc = [`${(s.length || 0).toLocaleString()} bp`];
+    if (s.strand) loc.push(`strand ${s.strand}`);
+    let acc = `<a href="${s.url}" target="_blank">${escapeHtml(s.accession)}</a>`;
+    if (s.region) acc += `:${s.region}`;
+    loc.push(acc);
+    const db = s.database ? `<span class="badge src" title="${escapeHtml(s.source || s.database)}">${escapeHtml(s.database)}</span>` : "";
+    return `<div>${loc.join(" · ")} ${db}</div>` +
       `<button class="seqbtn" onclick="toggleBox('${id}')">Show sequence</button>` +
       `<div class="seqbox" id="${id}">&gt;${escapeHtml(s.header || s.accession)}\n${chunk(s.sequence)}</div>`;
   }
@@ -347,9 +342,9 @@ function fnCell(g) {
 }
 
 function homoCell(g) {
-  if (!g.protein) return g.protein === null && g.reason === null ? PENDING : `<span class="noseq">—</span>`;
+  // OrthoDB works from the gene name + organism, so no protein match is needed.
   return `<button class="homobtn" id="hb_${g.gene_id}" ` +
-    `onclick="fetchHomologs('${g.gene_id}')">Find homologues</button>` +
+    `onclick="fetchHomologs('${g.gene_id}')">Find orthologues</button>` +
     `<div class="homobox" id="homobox_${g.gene_id}"></div>`;
 }
 
@@ -366,50 +361,35 @@ function toggleBox(id) {
 const HOMO_CACHE = {};
 async function fetchHomologs(geneId) {
   const g = (DATA.genes || []).find((x) => x.gene_id === geneId);
-  if (!g || !g.protein) return;
+  if (!g) return;
   const box = $("homobox_" + geneId);
   const btn = $("hb_" + geneId);
   if (box.style.display === "block") { box.style.display = "none"; return; }
   box.style.display = "block";
-  const src = $("homoSource").value;
-  const identity = $("homoIdentity").value;
-  const cacheKey = `${src}|${identity}|${g.protein.accession}|${g.protein.name}`;
+  const name = (g.protein && g.protein.name) || g.description || g.symbol || "";
+  const cacheKey = `${name}|${g.organism}`;
   if (HOMO_CACHE[cacheKey]) { box.innerHTML = HOMO_CACHE[cacheKey]; return; }
-  box.innerHTML = `<span class="spin">Looking up homologues…</span>`;
+  box.innerHTML = `<span class="spin">Looking up OrthoDB ortholog group…</span>`;
   btn.disabled = true;
   try {
     const params = new URLSearchParams({
-      source: src, limit: "25", identity,
-      accession: g.protein.accession,
-      name: g.protein.name || g.symbol || "",
-      organism: g.organism || "",
+      limit: "25", name, organism: g.organism || "",
     });
     const resp = await fetch("/api/homologs?" + params.toString());
     const data = await resp.json();
     const list = data.homologs || [];
     let html;
     if (!list.length) {
-      html = `<span class="noseq">No homologues found (${escapeHtml(data.message || src)}).</span>`;
+      html = `<span class="noseq">No OrthoDB ortholog group found for this gene.</span>`;
     } else {
-      const rows = list.map((h) => {
-        const acc = h.accession
-          ? `<a href="${h.url}" target="_blank">${escapeHtml(h.accession)}</a>`
-          : escapeHtml(h.gene_id || "");
-        return `<tr><td>${acc}</td><td><i>${escapeHtml(h.organism || "")}</i></td>` +
-          `<td>${escapeHtml(h.protein_name || h.description || "")}</td>` +
-          `<td>${h.length ? h.length + " aa" : ""}</td></tr>`;
-      }).join("");
-      let head;
-      if (data.source === "orthodb") {
-        head = `<div class="noseq">OrthoDB group ` +
-          `<a href="${data.group_url}" target="_blank">${escapeHtml(data.group || "")}</a>` +
-          ` (${escapeHtml(data.group_name || "")}) · ${data.count} members (showing ${list.length})</div>`;
-      } else {
-        const lvl = data.identity === "0.9" ? "90" : data.identity === "1.0" ? "100" : "50";
-        head = `<div class="noseq">UniRef${lvl} cluster ` +
-          `<a href="${data.cluster_url}" target="_blank">${escapeHtml(data.cluster || "")}</a>` +
-          ` · ${data.count} member(s) (showing ${list.length})</div>`;
-      }
+      const rows = list.map((h) =>
+        `<tr><td>${escapeHtml(h.gene_id || "")}</td>` +
+        `<td><i>${escapeHtml(h.organism || "")}</i></td>` +
+        `<td>${escapeHtml(h.description || "")}</td></tr>`).join("");
+      const head = `<div class="noseq">OrthoDB group ` +
+        `<a href="${data.group_url}" target="_blank">${escapeHtml(data.group || "")}</a>` +
+        ` (${escapeHtml(data.group_name || "")}${data.level_name ? ", " + escapeHtml(data.level_name) : ""})` +
+        ` · ${data.count} members (showing ${list.length})</div>`;
       html = head + `<table>${rows}</table>`;
     }
     HOMO_CACHE[cacheKey] = html;
@@ -446,7 +426,8 @@ function exportFasta() {
   (DATA.genes || []).forEach((g) => {
     if (!g.sequence) return;
     const s = g.sequence;
-    parts.push(`>${g.symbol}|GeneID:${g.gene_id}|${g.organism}|${s.accession}:${s.region}(${s.strand})`);
+    const loc = s.region ? `${s.accession}:${s.region}(${s.strand})` : s.accession;
+    parts.push(`>${g.symbol}|GeneID:${g.gene_id}|${g.organism}|${loc}|${s.database || "NCBI"}`);
     parts.push(chunk(s.sequence));
   });
   if (!parts.length) { setStatus("No sequences to export."); return; }
@@ -466,14 +447,14 @@ function exportProtFasta() {
 }
 
 function exportCsv() {
-  const rows = [["symbol", "gene_id", "organism", "description", "mentions", "papers", "seq_accession", "seq_region", "seq_strand", "seq_length_bp", "uniprot_accession", "uniprot_reviewed", "protein_name", "protein_length_aa", "ec", "gene_url", "pmids"]];
+  const rows = [["symbol", "gene_id", "organism", "description", "mentions", "papers", "seq_database", "seq_accession", "seq_region", "seq_strand", "seq_length_bp", "uniprot_accession", "uniprot_reviewed", "protein_name", "protein_length_aa", "ec", "gene_url", "pmids"]];
   (DATA.genes || []).forEach((g) => {
     const s = g.sequence || {};
     const p = g.protein || {};
     const a = (p.annotations || {});
     rows.push([
       g.symbol, g.gene_id, g.organism, g.description, g.mention_count, g.paper_count,
-      s.accession || "", s.region || "", s.strand || "", s.length || "",
+      s.database || "", s.accession || "", s.region || "", s.strand || "", s.length || "",
       p.accession || "", p.reviewed ? "yes" : (g.protein ? "no" : ""), p.name || "", p.length || "",
       (a.ec || []).join(" "),
       g.gene_url, (g.pmids || []).join(" "),
