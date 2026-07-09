@@ -39,7 +39,9 @@ from europepmc import EuropePMCClient
 from ncbi import NCBIClient, is_locus_tag
 from orthodb import OrthoDBClient
 from uniprot import UniProtClient
-from wormbase import WormBaseParasiteClient, is_helminth
+import veupathdb
+import wormbase
+from wormbase import is_helminth
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -53,7 +55,6 @@ uniprot: UniProtClient
 europepmc: EuropePMCClient
 orthodb: OrthoDBClient
 bvbrc: BVBRCClient
-wormbase: WormBaseParasiteClient
 ensembl: EnsemblClient
 cache: Cache
 _search_gate = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
@@ -62,14 +63,13 @@ _last_seen: dict[str, float] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client, uniprot, europepmc, orthodb, bvbrc, wormbase, ensembl, cache
+    global client, uniprot, europepmc, orthodb, bvbrc, ensembl, cache
     cache = Cache()
     client = NCBIClient()
     uniprot = UniProtClient(cache=cache)
     europepmc = EuropePMCClient()
     orthodb = OrthoDBClient()
     bvbrc = BVBRCClient(cache=cache)
-    wormbase = WormBaseParasiteClient(cache=cache)
     ensembl = EnsemblClient(cache=cache)
     try:
         yield
@@ -79,7 +79,6 @@ async def lifespan(app: FastAPI):
         await europepmc.aclose()
         await orthodb.aclose()
         await bvbrc.aclose()
-        await wormbase.aclose()
         await ensembl.aclose()
         cache.close()
 
@@ -277,14 +276,17 @@ async def _fallback_sequence(
 ) -> Optional[dict[str, Any]]:
     """
     Try the most authoritative organism-specific nucleotide database when NCBI
-    has nothing, routed by the organism's taxonomic lineage:
+    has nothing, routed by the organism's taxonomic lineage / genus:
 
       bacteria / viruses / archaea  -> BV-BRC
-      parasitic helminths           -> WormBase ParaSite (then Ensembl)
+      parasitic helminths           -> WormBase ParaSite  (via Ensembl mirror)
+      protozoan parasites / vectors -> VEuPathDB component (via Ensembl mirror)
       other eukaryotes              -> Ensembl (plants=TAIR, fungi=SGD,
                                         insects=FlyBase, vertebrates, protists)
 
-    The router is table-driven, so more databases can be slotted in per clade.
+    WormBase ParaSite and VEuPathDB sequences are retrieved through Ensembl's
+    reliable REST (which mirrors those assemblies and native gene IDs) but
+    labelled and linked to the source database of record.
     """
     organism = g.get("organism") or req.organism
     if not organism.strip():
@@ -311,12 +313,20 @@ async def _fallback_sequence(
         return await _try(bvbrc.fetch_sequence(gene=gene, name=name, organism=organism))
 
     if group == "helminth":
-        seq = await _try(wormbase.fetch_sequence(symbol=symbol, name=name, organism=organism))
-        return seq or await _try(
-            ensembl.fetch_sequence(symbol=symbol, name=name, organism=organism)
-        )
+        return await _try(ensembl.fetch_sequence(
+            symbol=symbol, name=name, organism=organism,
+            database=wormbase.LABEL, url_builder=wormbase.gene_url,
+        ))
 
-    # Any other eukaryote (plant, fungus, vertebrate, insect, protist, …).
+    veupath = veupathdb.component_for(organism)
+    if veupath:
+        label, url_builder = veupath
+        return await _try(ensembl.fetch_sequence(
+            symbol=symbol, name=name, organism=organism,
+            database=label, url_builder=url_builder,
+        ))
+
+    # Any other eukaryote (plant, fungus, vertebrate, insect, …).
     return await _try(ensembl.fetch_sequence(symbol=symbol, name=name, organism=organism))
 
 

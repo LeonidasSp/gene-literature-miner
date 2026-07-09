@@ -33,6 +33,7 @@ and labels each sequence with its source:
 |----------------|---------------|
 | Bacteria, viruses, archaea | **BV-BRC** |
 | Parasitic helminths (nematodes, flatworms) | **WormBase ParaSite** |
+| Protozoan parasites & vectors (*Plasmodium*, *Trypanosoma*, *Leishmania*, *Toxoplasma*, *Cryptosporidium*, *Giardia*, *Entamoeba*, mosquitoes/ticks …) | **VEuPathDB** (PlasmoDB, TriTrypDB, ToxoDB, VectorBase, …) |
 | Plants (incl. *Arabidopsis* → TAIR10) | **Ensembl Plants** |
 | Fungi (incl. budding yeast → SGD) | **Ensembl Fungi** |
 | Insects (incl. *Drosophila* → FlyBase) | **Ensembl Metazoa** |
@@ -40,6 +41,9 @@ and labels each sequence with its source:
 | Other protists / eukaryotes | **Ensembl** |
 
 The router is table-driven, so more organism databases can be slotted in per clade.
+WormBase ParaSite and VEuPathDB sequences are retrieved through Ensembl's reliable
+REST — which mirrors those genome assemblies and native gene IDs — and each is
+labelled and linked back to its source database of record.
 
 Results **stream in gene-by-gene**, so the table appears immediately and fills as
 each gene resolves. Every data source is free and needs no key.
@@ -97,5 +101,6 @@ per gene (OrthoDB). Export buttons:
 - **Orthologues** are OrthoDB ortholog groups (evolutionary orthology), scoped to
   the organism's taxonomic level where possible.
 - The literature and sequence layers (`backend/ncbi.py`, `backend/europepmc.py`,
-  `backend/bvbrc.py`, `backend/wormbase.py`, `backend/ensembl.py`) are isolated,
-  so further databases can be plugged in without touching the rest of the pipeline.
+  `backend/bvbrc.py`, `backend/ensembl.py`, `backend/wormbase.py`,
+  `backend/veupathdb.py`) are isolated, so further databases can be plugged in
+  without touching the rest of the pipeline.

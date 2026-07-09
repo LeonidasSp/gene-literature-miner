@@ -76,22 +76,49 @@ class EnsemblClient:
         await self._client.aclose()
 
     async def fetch_sequence(
-        self, *, symbol: str, name: str, organism: str
+        self,
+        *,
+        symbol: str,
+        name: str,
+        organism: str,
+        database: Optional[str] = None,
+        url_builder: Optional[Any] = None,
     ) -> Optional[dict[str, Any]]:
+        """
+        Resolve a gene's genomic sequence via Ensembl.
+
+        `database` / `url_builder` let a caller re-brand the result as the source
+        of record that Ensembl mirrors — e.g. WormBase ParaSite for helminths or
+        a VEuPathDB component for protozoan parasites — while still using
+        Ensembl's reliable REST for retrieval. The raw Ensembl result is cached
+        label-agnostically; branding is applied on top.
+        """
         species = (organism or "").strip().lower().replace(" ", "_")
         if not species or not (symbol or name):
             return None
         key = f"{symbol}|{name}|{species}".lower()
+        raw = None
         if self._cache is not None:
             cached = await self._cache.get("ensembl", key)
             if cached is not None:
-                return cached or None
-
-        result = await self._resolve(symbol, name, species)
-
-        if self._cache is not None:
-            await self._cache.set("ensembl", key, result or "")
-        return result
+                raw = cached or None
+            else:
+                raw = await self._resolve(symbol, name, species)
+                await self._cache.set("ensembl", key, raw or "")
+        else:
+            raw = await self._resolve(symbol, name, species)
+        if not raw:
+            return None
+        if database is None and url_builder is None:
+            return raw
+        out = dict(raw)
+        pretty = species.replace("_", " ")
+        if database:
+            out["database"] = database
+            out["source"] = f"{database} ({pretty})"
+        if url_builder:
+            out["url"] = url_builder(raw["accession"])
+        return out
 
     async def _resolve(
         self, symbol: str, name: str, species: str
