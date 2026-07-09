@@ -1,5 +1,7 @@
 # 🧬 Gene Literature Miner
 
+[![CI](https://github.com/LeonidasSp/gene-literature-miner/actions/workflows/ci.yml/badge.svg)](https://github.com/LeonidasSp/gene-literature-miner/actions/workflows/ci.yml)
+
 Mine the scientific literature for the genes discussed in a publication, then pull
 each gene's **nucleotide sequence**, **protein sequence**, **functional annotation**,
 and **cross-species homologues** — all from open databases, no API key required.

@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend:
+    name: Backend imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r backend/requirements.txt
+      - name: Byte-compile every backend module
+        run: python -m py_compile backend/*.py
+      - name: Import the FastAPI app
+        working-directory: backend
+        run: python -c "import main; print('app import OK')"
+
+  frontend:
+    name: Frontend JS syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax-check inline JavaScript
+        run: |
+          node -e '
+          const fs = require("fs");
+          const vm = require("vm");
+          const html = fs.readFileSync("frontend/index.html", "utf8");
+          const blocks = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]);
+          if (!blocks.length) { console.log("No inline <script> blocks found"); process.exit(0); }
+          let bad = 0;
+          blocks.forEach((code, i) => {
+            try { new vm.Script(code); }
+            catch (e) { console.error("::error::inline script block " + i + ": " + e.message); bad++; }
+          });
+          if (bad) process.exit(1);
+          console.log("JS syntax OK (" + blocks.length + " block(s))");
+          '
+
+  secret-scan:
+    name: Secret and internal-note guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if secrets or internal notes are tracked
+        run: |
+          fail=0
+          if git ls-files | grep -iE '\.docx$'; then
+            echo "::error::A .docx file is tracked. These have held tokens before - never commit them."
+            fail=1
+          fi
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.(example|sample|template)$'; then
+            echo "::error::A .env file is tracked. Environment files must stay gitignored (.env.example is allowed)."
+            fail=1
+          fi
+          if git grep -nIE 'hf_[A-Za-z0-9]{30,}' -- .; then
+            echo "::error::A Hugging Face token pattern (hf_...) is present in a tracked file."
+            fail=1
+          fi
+          if [ "$fail" = "1" ]; then exit 1; fi
+          echo "Secret scan clean."
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the deployment image
+        run: docker build -t gene-literature-miner:ci .
