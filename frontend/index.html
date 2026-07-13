@@ -114,7 +114,7 @@
         Mine full text of open-access papers (more genes; a little slower)
       </label>
     </div>
-    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code>) keeps only genes whose NCBI Gene record matches that species. Results stream in as each gene resolves.</div>
+    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code> or <code>S. aureus</code>) keeps only genes whose NCBI Gene record matches — abbreviations, common names, and genus-only names (<code>Brugia</code>) all work. Results stream in as each gene resolves.</div>
   </div>
 
   <div id="status" class="status"></div>
@@ -185,7 +185,8 @@ function runSearch() {
   es.addEventListener("meta", (e) => {
     const m = JSON.parse(e.data);
     DATA = { ...m, genes: [] };
-    setStatus(`Found ${m.paper_count} article(s); resolving ${m.gene_count} gene(s)…`);
+    const extra = m.note ? `  (${m.note})` : "";
+    setStatus(`Found ${m.paper_count} article(s); resolving ${m.gene_count} gene(s)…${extra}`);
   });
   es.addEventListener("genes", (e) => {
     const { genes } = JSON.parse(e.data);
@@ -256,7 +257,8 @@ function updateMeta() {
     `<span><b>${withSeq}</b> nucleotide</span>` +
     `<span><b>${withProt}</b> protein</span>` +
     `<span>source: <code>${escapeHtml(DATA.source || "pubmed")}</code></span>` +
-    `<span>term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>`;
+    `<span>term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>` +
+    (DATA.note ? `<span>ℹ️ ${escapeHtml(DATA.note)}</span>` : "");
 }
 
 function renderRows() {

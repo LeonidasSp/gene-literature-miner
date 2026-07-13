@@ -50,6 +50,7 @@ class NCBIClient:
         )
         self._limiter = RateLimiter(_MIN_INTERVAL)
         self._tax_cache: dict[str, str] = {}
+        self._org_cache: dict[str, Any] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -181,6 +182,44 @@ class NCBIClient:
             lin = f"{lin}; {n.group(1).strip()}"
         self._tax_cache[taxid] = lin
         return lin
+
+    async def resolve_organism(self, text: str) -> Optional[dict[str, str]]:
+        """
+        Resolve a user-typed organism to a canonical NCBI Taxonomy scientific name
+        + taxid. Handles abbreviations and common names that Taxonomy knows
+        ('E. coli' -> Escherichia coli; "baker's yeast" -> Saccharomyces
+        cerevisiae). Returns None when it can't resolve — the caller then keeps the
+        raw text, which PubMed's [Organism] tag still maps for abbreviated
+        binomials like 'B. pahangi'. Cached; soft-fails to None on any error.
+        """
+        text = (text or "").strip()
+        if not text:
+            return None
+        key = text.lower()
+        if key in self._org_cache:
+            return self._org_cache[key]
+        result: Optional[dict[str, str]] = None
+        try:
+            ids = (await self._get(
+                f"{EUTILS}/esearch.fcgi",
+                {**self._common(), "db": "taxonomy", "term": text,
+                 "retmode": "json", "retmax": "1"},
+            )).json().get("esearchresult", {}).get("idlist", [])
+            if ids:
+                taxid = ids[0]
+                rec = (await self._get(
+                    f"{EUTILS}/esummary.fcgi",
+                    {**self._common(), "db": "taxonomy", "id": taxid,
+                     "retmode": "json"},
+                )).json().get("result", {}).get(taxid, {})
+                name = rec.get("scientificname", "")
+                if name:
+                    result = {"name": name, "taxid": taxid,
+                              "rank": rec.get("rank", "")}
+        except (RuntimeError, ValueError, KeyError, TypeError):
+            result = None
+        self._org_cache[key] = result
+        return result
 
     async def search_gene_db(self, term: str, retmax: int = 20) -> list[str]:
         params = {

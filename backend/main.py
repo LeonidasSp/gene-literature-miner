@@ -21,6 +21,7 @@ import csv
 import io
 import json
 import os
+import re
 import time
 import zipfile
 from contextlib import asynccontextmanager
@@ -122,12 +123,54 @@ def _build_term(query: str, organism: str) -> str:
     return term
 
 
-def _organism_matches(scientific: str, wanted: str) -> bool:
-    if not wanted.strip():
-        return True
-    scientific = scientific.lower()
-    wanted = wanted.lower().strip()
-    return wanted in scientific or scientific in wanted
+_ORG_SPLIT = re.compile(r"[\s.]+")
+
+
+def _parse_org(name: str) -> tuple[str, str]:
+    """(genus, species-epithet) from an organism string, tolerating abbreviations:
+    'E. coli', 'e.coli', 'E coli' all -> ('e', 'coli')."""
+    parts = [p for p in _ORG_SPLIT.split((name or "").strip().lower()) if p]
+    if not parts:
+        return "", ""
+    return parts[0], (parts[1] if len(parts) > 1 else "")
+
+
+def _organism_match_level(scientific: str, wanted: str) -> int:
+    """
+    How well an NCBI Gene record's organism matches the requested organism:
+      2 = exact species / strain / genus-only-query hit
+      1 = same genus, different species
+      0 = no match
+
+    Tolerant of abbreviated binomials ('E. coli', 'B. pahangi') and genus-only
+    queries ('Brugia'). The caller keeps tier-1 (genus) matches only when no
+    tier-2 (exact-species) match exists, so precision is preserved when the
+    species actually is present (asking 'E. coli' won't drag in E. albertii),
+    while a species with no database entry still falls back to its genus
+    (asking 'B. pahangi' surfaces the B. malayi genes that do exist).
+    """
+    w = (wanted or "").strip().lower()
+    if not w:
+        return 2
+    s = (scientific or "").strip().lower()
+    if not s:
+        return 0
+    if w == s or w in s:  # exact, or a strain whose name contains the wanted one
+        return 2
+    wg, we = _parse_org(w)
+    sg, se = _parse_org(s)
+    if not wg or not sg:
+        return 0
+    genus_match = (
+        wg == sg
+        or (len(wg) == 1 and sg.startswith(wg))   # 'e' abbreviates 'escherichia'
+        or (len(sg) == 1 and wg.startswith(sg))
+    )
+    if not genus_match:
+        return 0
+    if not we:            # genus-only query -> any same-genus gene is a full hit
+        return 2
+    return 2 if we == se else 1
 
 
 async def _collect_pmids(req: SearchRequest) -> list[str]:
@@ -159,31 +202,48 @@ async def _collect_pmids(req: SearchRequest) -> list[str]:
 
 async def _collect_genes(
     req: SearchRequest,
-) -> tuple[list[dict[str, Any]], str, int, Optional[str]]:
-    """Steps 1-3: literature -> PubTator -> Gene-db metadata. No enrichment yet."""
+) -> tuple[list[dict[str, Any]], str, int, Optional[str], Optional[str]]:
+    """Steps 1-3: literature -> PubTator -> Gene-db metadata. No enrichment yet.
+
+    Returns (genes, pubmed_term, paper_count, message, note). `note` is an
+    informational aside (organism normalised, or genus-level fallback used).
+    """
+    note: Optional[str] = None
+    # Normalise the organism up front. When NCBI Taxonomy recognises it we use the
+    # canonical name for both the literature search and the gene filter ('E. coli'
+    # -> 'Escherichia coli'); when it doesn't, we keep the raw text, which PubMed's
+    # [Organism] tag still maps for abbreviated binomials like 'B. pahangi'.
+    if req.organism.strip():
+        resolved = await client.resolve_organism(req.organism)
+        if resolved and resolved.get("name"):
+            if resolved["name"].lower() != req.organism.strip().lower():
+                note = f"organism '{req.organism.strip()}' matched as {resolved['name']}"
+            req.organism = resolved["name"]
+
     term = _build_term(req.query, req.organism)
     pmids = await _collect_pmids(req)
     if not pmids:
-        return [], term, 0, "No articles matched this query."
+        return [], term, 0, "No articles matched this query.", note
 
     raw_genes = await client.genes_from_pubtator(pmids, full_text=req.full_text)
     if not raw_genes:
         return [], term, len(pmids), (
             "Articles found, but PubTator returned no gene annotations."
-        )
+        ), note
 
     candidate_ids = [
         gid for gid, e in raw_genes.items() if e["count"] >= req.min_mentions
     ]
     summaries = await client.gene_summaries(candidate_ids)
 
-    genes: list[dict[str, Any]] = []
+    scored: list[tuple[int, dict[str, Any]]] = []
     for gid in candidate_ids:
         summ = summaries.get(gid)
         if not summ:
             continue
         organism = (summ.get("organism") or {}).get("scientificname", "")
-        if not _organism_matches(organism, req.organism):
+        level = _organism_match_level(organism, req.organism)
+        if level == 0:
             continue
         entry = raw_genes[gid]
         ncbi_name = summ.get("nomenclaturesymbol") or summ.get("name") or ""
@@ -199,29 +259,37 @@ async def _collect_genes(
             candidate_symbols.append(lit_term)
         if description:
             candidate_symbols.append(description)
-        genes.append(
-            {
-                "gene_id": gid,
-                "symbol": symbol,
-                "ncbi_name": ncbi_name,
-                "aliases": sorted(entry["mentions"], key=lambda k: -entry["mentions"][k])[:5],
-                "description": description,
-                "organism": organism,
-                "taxid": str((summ.get("organism") or {}).get("taxid") or ""),
-                "mention_count": entry["count"],
-                "paper_count": len(entry["pmids"]),
-                "pmids": sorted(entry["pmids"], key=int, reverse=True),
-                "gene_url": f"https://www.ncbi.nlm.nih.gov/gene/{gid}",
-                "sequence": None,
-                "protein": None,
-                "reason": None,
-                "_summary": summ,
-                "_candidates": candidate_symbols,
-            }
-        )
+        scored.append((level, {
+            "gene_id": gid,
+            "symbol": symbol,
+            "ncbi_name": ncbi_name,
+            "aliases": sorted(entry["mentions"], key=lambda k: -entry["mentions"][k])[:5],
+            "description": description,
+            "organism": organism,
+            "taxid": str((summ.get("organism") or {}).get("taxid") or ""),
+            "mention_count": entry["count"],
+            "paper_count": len(entry["pmids"]),
+            "pmids": sorted(entry["pmids"], key=int, reverse=True),
+            "gene_url": f"https://www.ncbi.nlm.nih.gov/gene/{gid}",
+            "sequence": None,
+            "protein": None,
+            "reason": None,
+            "_summary": summ,
+            "_candidates": candidate_symbols,
+        }))
+
+    # Two-pass: prefer exact-species/strain hits; fall back to same-genus genes
+    # only when the exact species isn't present in the databases.
+    if any(lvl == 2 for lvl, _ in scored):
+        genes = [g for lvl, g in scored if lvl == 2]
+    else:
+        genes = [g for _, g in scored]
+        if genes and req.organism.strip():
+            fallback = "no exact-species match; showing same-genus genes"
+            note = f"{note}; {fallback}" if note else fallback
 
     genes.sort(key=lambda g: (g["mention_count"], g["paper_count"]), reverse=True)
-    return genes, term, len(pmids), None
+    return genes, term, len(pmids), None, note
 
 
 def _public_gene(g: dict[str, Any]) -> dict[str, Any]:
@@ -371,18 +439,19 @@ def _top_mention(mentions: dict[str, int]) -> str:
 @app.post("/api/search")
 async def search(req: SearchRequest) -> dict[str, Any]:
     async with _search_gate:
-        genes, term, paper_count, message = await _collect_genes(req)
+        genes, term, paper_count, message, note = await _collect_genes(req)
         if not genes:
             return {
                 "query": req.query, "organism": req.organism, "pubmed_term": term,
                 "paper_count": paper_count, "genes": [], "message": message,
+                "note": note,
             }
         to_fetch = genes[: req.max_genes_with_sequence]
         await asyncio.gather(*(_enrich_gene(g, req) for g in to_fetch))
         return {
             "query": req.query, "organism": req.organism, "pubmed_term": term,
             "paper_count": paper_count, "gene_count": len(genes),
-            "genes": [_public_gene(g) for g in genes],
+            "genes": [_public_gene(g) for g in genes], "note": note,
         }
 
 
@@ -412,11 +481,12 @@ async def search_stream(
     async def gen():
         async with _search_gate:
             try:
-                genes, term, paper_count, message = await _collect_genes(req)
+                genes, term, paper_count, message, note = await _collect_genes(req)
                 yield _sse("meta", {
                     "query": req.query, "organism": req.organism,
                     "pubmed_term": term, "paper_count": paper_count,
                     "gene_count": len(genes), "source": req.source,
+                    "note": note,
                 })
                 if not genes:
                     yield _sse("done", {"message": message, "gene_count": 0})
