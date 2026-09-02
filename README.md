@@ -8,7 +8,7 @@ Mine the scientific literature for the genes discussed in a publication, then pu
 each gene's **nucleotide sequence**, **protein sequence**, **functional annotation**,
 and **cross-species homologues** — all from open databases, no API key required.
 
-**🔴 Try it now, no install:** **https://leonsp-gene-literature-miner.hf.space**
+**🔴 Live app:** **https://leonsp-gene-literature-miner.hf.space** — nothing to install.
 *(free hosting — the first request after a while can take ~10s to wake up)*
 
 ![Gene Literature Miner — a results table streaming in gene sequences, annotations, and orthologues](docs/screenshot.png)
