@@ -171,7 +171,13 @@ class EnsemblClient:
         await self._limiter.wait()
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}content-type=application/json"
-        for attempt in range(3):
+        # Ensembl's REST occasionally throws a transient 500 for a few seconds
+        # (observed live for mirrored/non-core genomes, e.g. WormBase-imported
+        # helminth assemblies) before recovering on its own. 3 quick attempts
+        # (~2.4s total) isn't enough to ride that out and was causing genes to
+        # come back with "no sequence" even though the record resolves fine
+        # moments later -- so 5xx gets its own longer backoff.
+        for attempt in range(5):
             try:
                 resp = await self._client.get(url)
                 if resp.status_code in (400, 404):
@@ -179,8 +185,11 @@ class EnsemblClient:
                 if resp.status_code == 429:
                     await asyncio.sleep(1.0 + attempt)
                     continue
+                if resp.status_code >= 500:
+                    await asyncio.sleep(1.5 + attempt * 1.5)
+                    continue
                 resp.raise_for_status()
                 return resp.json()
             except (httpx.HTTPError, ValueError):
-                await asyncio.sleep(0.4 * (attempt + 1))
+                await asyncio.sleep(0.5 * (attempt + 1))
         return None
