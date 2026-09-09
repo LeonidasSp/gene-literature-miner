@@ -312,9 +312,16 @@ function seqCell(g) {
     if (s.region) acc += `:${s.region}`;
     loc.push(acc);
     const db = s.database ? `<span class="badge src" title="${escapeHtml(s.source || s.database)}">${escapeHtml(s.database)}</span>` : "";
+    // Build a gene-specific FASTA header instead of relaying the source
+    // database's raw record title: for a gene that lives directly on a
+    // whole-chromosome accession (the norm for bacteria), that title names
+    // the parent genome ("...complete genome") even though only the gene's
+    // own region is returned below. Matches the header used in FASTA exports.
+    const plainLoc = s.region ? `${s.accession}:${s.region}${s.strand ? "(" + s.strand + ")" : ""}` : s.accession;
+    const cleanHeader = `${g.symbol}|GeneID:${g.gene_id}|${g.organism || ""}|${plainLoc}|${s.database || "NCBI"}`;
     return `<div>${loc.join(" · ")} ${db}</div>` +
       `<button class="seqbtn" onclick="toggleBox('${id}')">Show sequence</button>` +
-      `<div class="seqbox" id="${id}">&gt;${escapeHtml(s.header || s.accession)}\n${chunk(s.sequence)}</div>`;
+      `<div class="seqbox" id="${id}">&gt;${escapeHtml(cleanHeader)}\n${chunk(s.sequence)}</div>`;
   }
   return `<span class="noseq">no sequence</span> ${whyMark(g)}`;
 }
@@ -342,9 +349,17 @@ function fnCell(g) {
   if (a.families) bits.push(`<div class="noseq">${escapeHtml(a.families)}</div>`);
   if ((a.keywords || []).length)
     bits.push(`<div>${a.keywords.slice(0, 6).map((k) => `<span class="pill">${escapeHtml(k)}</span>`).join("")}</div>`);
+  if ((a.go || []).length) {
+    const shown = a.go.slice(0, 6);
+    const goHtml = shown.map((x) =>
+      `<a class="pill" href="https://www.ebi.ac.uk/QuickGO/term/${encodeURIComponent(x.id || "")}" ` +
+      `target="_blank" title="${escapeHtml(x.id || "")}">${escapeHtml(x.term || x.id || "GO")}</a>`
+    ).join("");
+    const more = a.go.length > shown.length ? ` <span class="noseq">+${a.go.length - shown.length} more</span>` : "";
+    bits.push(`<div>${goHtml}${more}</div>`);
+  }
   const refs = [];
   (a.pfam || []).forEach((p) => refs.push(`<a href="https://www.ebi.ac.uk/interpro/entry/pfam/${p.id}/" target="_blank">${escapeHtml(p.id)}</a>`));
-  if ((a.go || []).length) refs.push(`${a.go.length} GO`);
   if ((a.kegg || []).length) refs.push(`<a href="https://www.genome.jp/dbget-bin/www_bget?${encodeURIComponent(a.kegg[0])}" target="_blank">KEGG</a>`);
   if (refs.length) bits.push(`<div class="noseq">${refs.join(" · ")}</div>`);
   return bits.join("") || `<span class="noseq">—</span>`;

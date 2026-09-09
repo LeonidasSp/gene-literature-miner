@@ -13,3 +13,5 @@ PROJECT_LOG.md
 *.sqlite
 backend/_smoketest.py
 backend/_httptest.py
+.venv/
+uvicorn.*.log
