@@ -65,15 +65,24 @@ class NCBIClient:
         if rate_limited:
             await self._limiter.wait()
         last_exc: Optional[Exception] = None
-        for attempt in range(3):
+        # A 5xx is usually a brief, self-clearing blip (confirmed live for
+        # Ensembl during this session; NCBI is prone to the same pattern under
+        # load) -- give it a longer backoff than a genuine client error
+        # (400/404, not worth retrying) or a dropped connection.
+        for attempt in range(5):
             try:
                 resp = await self._client.get(url, params=params)
                 if resp.status_code == 429:  # too many requests -> back off
                     await asyncio.sleep(1.0 + attempt)
                     continue
+                if resp.status_code in (400, 404):
+                    raise RuntimeError(f"NCBI request failed: {url} (HTTP {resp.status_code})")
+                if resp.status_code >= 500:
+                    await asyncio.sleep(1.5 + attempt * 1.5)
+                    continue
                 resp.raise_for_status()
                 return resp
-            except (httpx.HTTPError,) as exc:  # transient network/5xx
+            except (httpx.HTTPError,) as exc:  # transient network error
                 last_exc = exc
                 await asyncio.sleep(0.5 * (attempt + 1))
         raise RuntimeError(f"NCBI request failed: {url} ({last_exc})")
