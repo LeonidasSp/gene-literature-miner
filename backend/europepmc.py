@@ -68,11 +68,19 @@ class EuropePMCClient:
         return pmids[:retmax]
 
     async def _get(self, params: dict) -> Optional[httpx.Response]:
-        for attempt in range(3):
+        # See ncbi.py's _get: a 5xx gets a longer backoff than a genuine
+        # client error or a dropped connection, since it's usually a brief,
+        # self-clearing blip rather than a real failure.
+        for attempt in range(5):
             try:
                 resp = await self._client.get(EUROPEPMC, params=params)
                 if resp.status_code == 429:
                     await asyncio.sleep(1.0 + attempt)
+                    continue
+                if resp.status_code in (400, 404):
+                    return None
+                if resp.status_code >= 500:
+                    await asyncio.sleep(1.5 + attempt * 1.5)
                     continue
                 resp.raise_for_status()
                 return resp
