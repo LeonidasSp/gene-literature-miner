@@ -6,77 +6,79 @@
 <title>Gene Literature Miner</title>
 <style>
   :root {
-    --bg: #0f172a; --panel: #1e293b; --panel2: #273449; --text: #e2e8f0;
-    --muted: #94a3b8; --accent: #38bdf8; --accent2: #34d399; --border: #334155;
-    --warn: #fbbf24;
+    --bg: #ffffff; --panel: #ffffff; --panel2: #f2f2f2; --text: #1a1a1a;
+    --muted: #555555; --accent: #0000cc; --accent2: #006600; --border: #999999;
+    --warn: #995c00;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.45;
+    margin: 0; font-family: Arial, Helvetica, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.4;
   }
-  header { padding: 24px 28px 8px; }
-  h1 { margin: 0 0 4px; font-size: 22px; }
+  header { padding: 16px 20px 10px; border-bottom: 2px solid var(--border); }
+  h1 { margin: 0 0 4px; font-size: 20px; }
   .sub { color: var(--muted); font-size: 13px; }
-  main { padding: 12px 28px 60px; max-width: 1320px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  main { padding: 14px 20px 60px; max-width: 1320px; }
+  .card { background: var(--panel); border: 1px solid var(--border); padding: 14px; }
   .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
   input, button, select { font: inherit; }
   input[type=text], input[type=number], select {
-    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 8px; padding: 9px 11px; outline: none;
+    background: #ffffff; border: 1px solid var(--border); color: var(--text);
+    padding: 6px 8px; outline: none;
   }
   input:focus, select:focus { border-color: var(--accent); }
   .grow { flex: 1; min-width: 200px; }
   button {
-    background: var(--accent); color: #04222f; border: none; border-radius: 8px;
-    padding: 10px 18px; font-weight: 600; cursor: pointer;
+    background: #e6e6e6; color: #000000; border: 1px solid #666666;
+    padding: 7px 14px; font-weight: normal; cursor: pointer;
   }
-  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button:hover { background: #d9d9d9; }
+  button.ghost { background: #f2f2f2; color: #000000; border: 1px solid #999999; }
   button:disabled { opacity: .55; cursor: default; }
-  .status { margin: 16px 0; color: var(--muted); font-size: 14px; min-height: 20px; }
-  .bar { height: 4px; background: var(--panel2); border-radius: 4px; overflow: hidden; margin: 6px 0 0; display: none; }
+  .status { margin: 14px 0; color: var(--muted); font-size: 13px; min-height: 20px; }
+  .bar { height: 6px; background: var(--panel2); border: 1px solid var(--border); overflow: hidden; margin: 6px 0 0; display: none; }
   .bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
-  .meta { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 13px; color: var(--muted); }
+  .meta { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
   .meta b { color: var(--text); }
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); cursor: pointer; user-select: none; }
-  tr:hover td { background: rgba(148,163,184,.06); }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  .sym { font-weight: 700; }
-  .pill { display: inline-block; background: var(--panel2); border: 1px solid var(--border);
-          border-radius: 999px; padding: 1px 8px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
-  .seqbtn { background: transparent; color: var(--accent2); border: 1px solid var(--accent2);
-            padding: 4px 10px; border-radius: 7px; font-size: 12px; cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border: 1px solid var(--border); vertical-align: top; }
+  th { color: #000000; font-weight: bold; position: sticky; top: 0; background: #e6e6e6; cursor: pointer; user-select: none; }
+  tr:nth-child(even) td { background: #f7f7f7; }
+  tr:hover td { background: #eef2f7; }
+  a { color: #0000cc; text-decoration: underline; }
+  a:hover { color: #cc0000; }
+  .sym { font-weight: bold; }
+  .pill { display: inline-block; background: #f2f2f2; border: 1px solid #999999;
+          padding: 0 6px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
+  .seqbtn { background: #f2f2f2; color: #000000; border: 1px solid #666666;
+            padding: 3px 8px; font-size: 11px; cursor: pointer; }
   .noseq { color: var(--muted); font-size: 12px; }
   .why { color: var(--warn); cursor: help; font-size: 11px; border-bottom: 1px dotted var(--warn); }
-  .spin { color: var(--accent); font-size: 12px; }
-  .badge { display: inline-block; border-radius: 5px; padding: 0 6px; font-size: 10px;
-           font-weight: 700; vertical-align: middle; }
-  .badge.rev { background: rgba(52,211,153,.15); color: var(--accent2); border: 1px solid var(--accent2); }
-  .badge.unrev { background: var(--panel2); color: var(--muted); border: 1px solid var(--border); }
-  .badge.src { background: rgba(56,189,248,.13); color: var(--accent); border: 1px solid var(--accent); cursor: help; }
-  .seqbox { display: none; background: #0b1220; border: 1px solid var(--border); border-radius: 8px;
-            padding: 10px; margin-top: 8px; font-family: ui-monospace, Menlo, Consolas, monospace;
+  .spin { color: var(--muted); font-size: 12px; font-style: italic; }
+  .badge { display: inline-block; padding: 0 5px; font-size: 10px;
+           font-weight: bold; vertical-align: middle; border: 1px solid #999999; }
+  .badge.rev { background: #eaffea; color: #006600; border-color: #006600; }
+  .badge.unrev { background: #f2f2f2; color: #555555; border-color: #999999; }
+  .badge.src { background: #eef2ff; color: #0000cc; border-color: #0000cc; cursor: help; }
+  .seqbox { display: none; background: #f7f7f7; border: 1px solid var(--border);
+            padding: 8px; margin-top: 6px; font-family: "Courier New", Courier, monospace;
             font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
-  .homobox { display: none; margin-top: 8px; font-size: 12px; }
+  .homobox { display: none; margin-top: 6px; font-size: 12px; }
   .homobox table { margin: 0; font-size: 12px; }
-  .homobox td { padding: 4px 8px; border-bottom: 1px solid var(--border); }
-  .homobtn { background: transparent; color: var(--accent); border: 1px solid var(--accent);
-             padding: 4px 10px; border-radius: 7px; font-size: 12px; cursor: pointer; }
-  .toolbar { display: flex; gap: 10px; margin: 14px 0 4px; flex-wrap: wrap; align-items: center; }
+  .homobox td { padding: 4px 8px; border: 1px solid var(--border); }
+  .homobtn { background: #f2f2f2; color: #000000; border: 1px solid #666666;
+             padding: 3px 8px; font-size: 11px; cursor: pointer; }
+  .toolbar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; align-items: center; }
   .ctl { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
-  .ctl select { padding: 5px 8px; }
+  .ctl select { padding: 4px 6px; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+  code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #dddddd; font-size: 12px; font-family: "Courier New", Courier, monospace; }
 </style>
 </head>
 <body>
 <header>
-  <h1>🧬 Gene Literature Miner</h1>
+  <h1>Gene Literature Miner</h1>
   <div class="sub">Mine the literature for genes on a topic, then pull their nucleotide + protein sequences, functional annotation, and homologues.</div>
 </header>
 <main>
@@ -110,7 +112,7 @@
     </div>
     <div class="row" style="margin-top:10px">
       <label style="display:flex; align-items:center; gap:7px; margin:0; cursor:pointer; font-size:13px; color:var(--text)">
-        <input type="checkbox" id="fullText" checked style="width:16px; height:16px; accent-color:var(--accent)" />
+        <input type="checkbox" id="fullText" checked style="width:16px; height:16px" />
         Mine full text of open-access papers (more genes; a little slower)
       </label>
     </div>
@@ -123,10 +125,10 @@
   <div id="results" class="card" style="display:none">
     <div id="meta" class="meta"></div>
     <div class="toolbar">
-      <button class="ghost" id="exportFasta">⬇ Nucleotide FASTA</button>
-      <button class="ghost" id="exportProtFasta">⬇ Protein FASTA</button>
-      <button class="ghost" id="exportCsv">⬇ CSV</button>
-      <button class="ghost" id="exportBundle">⬇ Download all (zip)</button>
+      <button class="ghost" id="exportFasta">Download nucleotide FASTA</button>
+      <button class="ghost" id="exportProtFasta">Download protein FASTA</button>
+      <button class="ghost" id="exportCsv">Download CSV</button>
+      <button class="ghost" id="exportBundle">Download all (zip)</button>
       <span class="ctl">Orthologues via <b>OrthoDB</b></span>
     </div>
     <div style="overflow:auto; max-height:70vh">
@@ -225,7 +227,7 @@ function runSearch() {
   es.addEventListener("error", () => {
     // Either a server 'error' event or a dropped connection.
     finish();
-    if (!DATA || !(DATA.genes || []).length) setStatus("❌ Search failed or connection lost.");
+    if (!DATA || !(DATA.genes || []).length) setStatus("Error: search failed or connection lost.");
   });
 }
 
@@ -258,7 +260,7 @@ function updateMeta() {
     `<span><b>${withProt}</b> protein</span>` +
     `<span>source: <code>${escapeHtml(DATA.source || "pubmed")}</code></span>` +
     `<span>term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>` +
-    (DATA.note ? `<span>ℹ️ ${escapeHtml(DATA.note)}</span>` : "");
+    (DATA.note ? `<span>Note: ${escapeHtml(DATA.note)}</span>` : "");
 }
 
 function renderRows() {
@@ -419,7 +421,7 @@ async function fetchHomologs(geneId) {
     HOMO_CACHE[cacheKey] = html;
     box.innerHTML = html;
   } catch (e) {
-    box.innerHTML = `<span class="noseq">❌ ${escapeHtml(e.message)}</span>`;
+    box.innerHTML = `<span class="noseq">Error: ${escapeHtml(e.message)}</span>`;
   } finally {
     btn.disabled = false;
   }
@@ -506,7 +508,7 @@ async function exportBundle() {
     URL.revokeObjectURL(a.href);
     setStatus("");
   } catch (e) {
-    setStatus("❌ Bundle failed: " + e.message);
+    setStatus("Error: bundle failed: " + e.message);
   }
 }
 
