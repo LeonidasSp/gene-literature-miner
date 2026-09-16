@@ -334,11 +334,16 @@ function protCell(g) {
     const p = g.protein, id = "protbox_" + g.gene_id;
     const badge = p.reviewed ? `<span class="badge rev">Swiss-Prot</span>`
                              : `<span class="badge unrev">TrEMBL</span>`;
+    // AlphaFold DB is keyed by UniProt accession directly, so no extra lookup
+    // is needed -- it covers essentially the whole of UniProt (reviewed and
+    // unreviewed alike), so the link is shown whenever there's a UniProt match.
+    const alphafold = `<a href="https://alphafold.ebi.ac.uk/entry/${encodeURIComponent(p.accession)}" target="_blank">3D structure (AlphaFold)</a>`;
     return `<div><a href="${p.url}" target="_blank">${escapeHtml(p.accession)}</a> ${badge}</div>` +
       `<div class="noseq">${escapeHtml(p.name || "")}</div>` +
       (p.length ? `<div>${p.length.toLocaleString()} aa · ` +
         `<button class="seqbtn" onclick="toggleBox('${id}')">Show sequence</button></div>` +
-        `<div class="seqbox" id="${id}">&gt;${escapeHtml(p.accession)} ${escapeHtml(p.name || "")}\n${chunk(p.sequence)}</div>` : "");
+        `<div class="seqbox" id="${id}">&gt;${escapeHtml(p.accession)} ${escapeHtml(p.name || "")}\n${chunk(p.sequence)}</div>` : "") +
+      `<div>${alphafold}</div>`;
   }
   return `<span class="noseq">no UniProt match</span>`;
 }
