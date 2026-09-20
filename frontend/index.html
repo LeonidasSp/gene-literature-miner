@@ -5,152 +5,241 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gene Literature Miner</title>
 <style>
+  /* Colour-blind-safe palette (Okabe & Ito): blue #0072B2, bluish green #009E73,
+     orange #E69F00, plus pale tints of them and neutral grays. Colour is never the
+     only signal -- badges carry text labels, links are underlined, and "reviewed"
+     vs "unreviewed" also differ in border style (solid vs dashed). */
   :root {
-    --bg: #ffffff; --panel: #ffffff; --panel2: #f2f2f2; --text: #1a1a1a;
-    --muted: #555555; --accent: #0000cc; --accent2: #006600; --border: #999999;
-    --warn: #995c00;
+    --blue: #0072b2;       --blue-dark: #005a8c;   --blue-tint: #e3f1fa;
+    --green: #009e73;      --green-text: #00634a;  --green-tint: #e3f4ee;
+    --orange: #e69f00;     --orange-text: #7a4b00; --orange-tint: #fdf1d8;
+    --bg: #f5f5f5;        --panel: #ffffff;
+    --border: #b4c7d6;    --line: #d9e2ea;
+    --text: #1a1a1a;      --muted: #505050;       --field: #8c8c8c;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: Arial, Helvetica, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.4;
   }
-  header { padding: 16px 20px 10px; border-bottom: 2px solid var(--border); }
-  h1 { margin: 0 0 4px; font-size: 20px; }
-  .sub { color: var(--muted); font-size: 13px; }
-  main { padding: 14px 20px 60px; max-width: 1320px; }
-  .card { background: var(--panel); border: 1px solid var(--border); padding: 14px; }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-  input, button, select { font: inherit; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  .top {
+    display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+    gap: 8px 20px; padding: 18px 24px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .top h1 { margin: 0; font-size: 26px; font-weight: bold; }
+  .top nav { display: flex; gap: 18px; font-size: 14px; }
+  main { padding: 18px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  .intro { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+
+  /* Boxes: bordered, slightly rounded panels with a tinted header bar. */
+  .panels { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .p-search  { flex: 2 1 460px; }
+  .p-options { flex: 1 1 300px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; }
+  .panel-head {
+    background: var(--blue-tint); border-bottom: 1px solid var(--border); border-radius: 4px 4px 0 0;
+    padding: 12px 40px; font-weight: bold; font-size: 15px; text-align: center;
+  }
+  .panel-head.split {
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+    gap: 8px 12px; text-align: left; padding: 9px 14px;
+  }
+  .head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .panel-body { padding: 14px 16px; }
+
+  /* Collapsible panels: header bar with a triangle at the right, like an accordion. */
+  details.panel > summary.panel-head { list-style: none; cursor: pointer; position: relative; }
+  details.panel > summary.panel-head::-webkit-details-marker { display: none; }
+  details.panel > summary.panel-head::after {
+    content: ""; position: absolute; right: 16px; top: 50%; margin-top: -3px;
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid var(--text);
+  }
+  details.panel:not([open]) > summary.panel-head::after {
+    margin-top: -6px; border-top: 6px solid transparent; border-bottom: 6px solid transparent;
+    border-left: 8px solid var(--text); border-right: 0;
+  }
+  details.panel:not([open]) > summary.panel-head { border-bottom-color: transparent; border-radius: 4px; }
+
+  /* Form controls */
+  .field { margin-bottom: 12px; }
+  label { display: block; font-size: 13px; font-weight: bold; margin: 0 0 4px; }
+  label.checkrow { display: flex; align-items: flex-start; gap: 8px; font-weight: normal; margin: 0; cursor: pointer; }
+  label.checkrow input { margin-top: 2px; width: 16px; height: 16px; flex: none; }
   input[type=text], input[type=number], select {
-    background: #ffffff; border: 1px solid var(--border); color: var(--text);
-    padding: 6px 8px; outline: none;
+    width: 100%; font: inherit; font-size: 14px; background: #fff; color: var(--text);
+    border: 1px solid var(--field); border-radius: 3px; padding: 7px 9px;
   }
-  input:focus, select:focus { border-color: var(--accent); }
-  .grow { flex: 1; min-width: 200px; }
+  input[type=number] { max-width: 130px; }
   button {
-    background: #e6e6e6; color: #000000; border: 1px solid #666666;
-    padding: 7px 14px; font-weight: normal; cursor: pointer;
+    font: inherit; font-size: 13px; background: #f2f2f2; color: var(--text);
+    border: 1px solid var(--field); border-radius: 4px; padding: 5px 12px; cursor: pointer;
   }
-  button:hover { background: #d9d9d9; }
-  button.ghost { background: #f2f2f2; color: #000000; border: 1px solid #999999; }
+  button:hover { background: #e4e4e4; }
   button:disabled { opacity: .55; cursor: default; }
-  .status { margin: 14px 0; color: var(--muted); font-size: 13px; min-height: 20px; }
-  .bar { height: 6px; background: var(--panel2); border: 1px solid var(--border); overflow: hidden; margin: 6px 0 0; display: none; }
-  .bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
-  .meta { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+  .btn-primary {
+    background: var(--blue); color: #fff; border: 1px solid var(--blue-dark);
+    border-radius: 8px; padding: 10px 36px; font-size: 15px; font-weight: bold;
+  }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .hint { font-size: 12px; color: var(--muted); }
+
+  /* Round "?" help icons with a tooltip (shows on hover and keyboard focus). */
+  .help {
+    position: relative; display: inline-block; width: 16px; height: 16px; padding: 0;
+    margin-left: 5px; vertical-align: middle; background: transparent; color: var(--muted);
+    border: 1px solid var(--muted); border-radius: 50%; font-size: 11px; font-weight: bold;
+    line-height: 14px; text-align: center; cursor: help;
+  }
+  .help:hover, .help:focus { background: transparent; color: var(--blue-dark); border-color: var(--blue-dark); }
+  .help::after {
+    content: attr(data-tip); display: none; position: absolute; z-index: 10; top: 22px; left: -6px;
+    width: 250px; padding: 8px 10px; background: #262626; color: #fff; border-radius: 4px;
+    font-size: 12px; font-weight: normal; line-height: 1.35; text-align: left; white-space: normal;
+  }
+  .help:hover::after, .help:focus::after { display: block; }
+  .help.tip-left::after { left: auto; right: -6px; }
+
+  /* Status + progress */
+  .status { margin: 14px 0 6px; color: var(--muted); font-size: 13px; min-height: 18px; }
+  .bar { height: 8px; background: #e2e8ed; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin: 0 0 14px; display: none; }
+  .bar > span { display: block; height: 100%; width: 0; background: var(--blue); transition: width .25s; }
+
+  /* Results */
+  #results { margin-top: 10px; }
+  .meta { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12px; color: var(--muted); }
   .meta b { color: var(--text); }
-  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
-  th, td { text-align: left; padding: 6px 8px; border: 1px solid var(--border); vertical-align: top; }
-  th { color: #000000; font-weight: bold; position: sticky; top: 0; background: #e6e6e6; cursor: pointer; user-select: none; }
-  tr:nth-child(even) td { background: #f7f7f7; }
-  tr:hover td { background: #eef2f7; }
-  a { color: #0000cc; text-decoration: underline; }
-  a:hover { color: #cc0000; }
+  .meta .note { background: var(--orange-tint); color: var(--orange-text); border: 1px solid var(--orange); border-radius: 3px; padding: 0 6px; }
+  .ctl { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--blue-tint); font-weight: bold; position: sticky; top: 0; cursor: pointer; user-select: none; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #f0f7fc; }
+  a { color: var(--blue); text-decoration: underline; }
+  a:hover { color: var(--blue-dark); }
   .sym { font-weight: bold; }
-  .pill { display: inline-block; background: #f2f2f2; border: 1px solid #999999;
+  .pill { display: inline-block; background: #f3f3f3; border: 1px solid #bdbdbd; border-radius: 3px;
           padding: 0 6px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
-  .seqbtn { background: #f2f2f2; color: #000000; border: 1px solid #666666;
-            padding: 3px 8px; font-size: 11px; cursor: pointer; }
+  .seqbtn, .homobtn { font-size: 11px; padding: 3px 8px; }
   .noseq { color: var(--muted); font-size: 12px; }
-  .why { color: var(--warn); cursor: help; font-size: 11px; border-bottom: 1px dotted var(--warn); }
+  .why { color: var(--orange-text); cursor: help; font-size: 11px; border-bottom: 2px dotted var(--orange-text); }
   .spin { color: var(--muted); font-size: 12px; font-style: italic; }
-  .badge { display: inline-block; padding: 0 5px; font-size: 10px;
-           font-weight: bold; vertical-align: middle; border: 1px solid #999999; }
-  .badge.rev { background: #eaffea; color: #006600; border-color: #006600; }
-  .badge.unrev { background: #f2f2f2; color: #555555; border-color: #999999; }
-  .badge.src { background: #eef2ff; color: #0000cc; border-color: #0000cc; cursor: help; }
-  .seqbox { display: none; background: #f7f7f7; border: 1px solid var(--border);
+  .badge { display: inline-block; padding: 0 5px; font-size: 10px; font-weight: bold; vertical-align: middle;
+           border: 1px solid var(--field); border-radius: 3px; }
+  .badge.rev   { background: var(--green-tint); color: var(--green-text); border: 1.5px solid var(--green); }
+  .badge.unrev { background: #f3f3f3; color: var(--muted); border: 1px dashed var(--field); }
+  .badge.src   { background: var(--blue-tint); color: var(--blue-dark); border-color: var(--blue); cursor: help; }
+  .seqbox { display: none; background: #f7f7f7; border: 1px solid var(--border); border-radius: 3px;
             padding: 8px; margin-top: 6px; font-family: "Courier New", Courier, monospace;
             font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
   .homobox { display: none; margin-top: 6px; font-size: 12px; }
   .homobox table { margin: 0; font-size: 12px; }
-  .homobox td { padding: 4px 8px; border: 1px solid var(--border); }
-  .homobtn { background: #f2f2f2; color: #000000; border: 1px solid #666666;
-             padding: 3px 8px; font-size: 11px; cursor: pointer; }
-  .toolbar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; align-items: center; }
-  .ctl { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
-  .ctl select { padding: 4px 6px; }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #dddddd; font-size: 12px; font-family: "Courier New", Courier, monospace; }
+  .homobox td { padding: 4px 8px; }
+  code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; font-family: "Courier New", Courier, monospace; }
 </style>
 </head>
 <body>
-<header>
+<header class="top">
   <h1>Gene Literature Miner</h1>
-  <div class="sub">Mine the literature for genes on a topic, then pull their nucleotide + protein sequences, functional annotation, and homologues.</div>
+  <nav aria-label="Links">
+    <a href="/docs" target="_blank" rel="noopener">API docs</a>
+    <a href="https://github.com/LeonidasSp/gene-literature-miner" target="_blank" rel="noopener">GitHub</a>
+  </nav>
 </header>
 <main>
-  <div class="card">
-    <div class="row">
-      <div class="grow">
-        <label>Topic / query</label>
-        <input id="query" type="text" placeholder="e.g. biofilm formation" class="grow" style="width:100%" />
+  <p class="intro">Mine the literature for genes on a topic, then pull their nucleotide + protein sequences, functional annotation, and homologues.</p>
+
+  <div class="panels">
+    <section class="panel p-search" aria-labelledby="search-h">
+      <div class="panel-head" id="search-h">Search literature</div>
+      <div class="panel-body">
+        <div class="field">
+          <label for="query">Topic / query
+            <button type="button" class="help" data-tip="A free-text literature search, e.g. 'biofilm formation'. The most relevant articles are scanned for gene mentions.">?</button></label>
+          <input id="query" type="text" placeholder="e.g. biofilm formation" />
+        </div>
+        <div class="field">
+          <label for="organism">Organism (optional filter)
+            <button type="button" class="help" data-tip="Keeps only genes whose NCBI Gene record matches. Abbreviations (E. coli), common names and genus names (Brugia) work. If the exact species has no gene records, same-genus genes are shown and a note says so.">?</button></label>
+          <input id="organism" type="text" placeholder="e.g. Staphylococcus aureus" />
+        </div>
+        <div class="actions">
+          <span class="hint">Results stream in as each gene resolves.</span>
+          <button id="go" class="btn-primary">Search</button>
+        </div>
       </div>
-      <div class="grow">
-        <label>Organism (optional filter)</label>
-        <input id="organism" type="text" placeholder="e.g. Staphylococcus aureus" style="width:100%" />
+    </section>
+
+    <details class="panel p-options" open>
+      <summary class="panel-head">Advanced options</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label for="source">Literature source
+            <button type="button" class="help tip-left" data-tip="PubMed, Europe PMC (adds preprints and full text), or both. With 'Both', up to twice the paper limit is scanned.">?</button></label>
+          <select id="source">
+            <option value="pubmed">PubMed</option>
+            <option value="europepmc">Europe PMC</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="maxPapers">Max papers
+            <button type="button" class="help tip-left" data-tip="How many of the most relevant articles to scan. More papers surface more genes but take longer.">?</button></label>
+          <input id="maxPapers" type="number" value="50" min="1" max="200" />
+        </div>
+        <div class="field">
+          <label for="minMentions">Min mentions
+            <button type="button" class="help tip-left" data-tip="A mention is one time a paper names the gene. Genes named fewer than this many times across all scanned papers are hidden.">?</button></label>
+          <input id="minMentions" type="number" value="1" min="1" />
+        </div>
+        <label class="checkrow" for="fullText">
+          <input type="checkbox" id="fullText" checked />
+          <span>Mine full text of open-access papers (more genes; a little slower)
+            <button type="button" class="help tip-left" data-tip="For open-access papers the whole article is scanned, not just the abstract. Paywalled papers are still covered at the abstract level.">?</button></span>
+        </label>
       </div>
-      <div>
-        <label>Literature source</label>
-        <select id="source">
-          <option value="pubmed">PubMed</option>
-          <option value="europepmc">Europe PMC</option>
-          <option value="both">Both</option>
-        </select>
-      </div>
-      <div>
-        <label>Max papers</label>
-        <input id="maxPapers" type="number" value="50" min="1" max="200" style="width:90px" />
-      </div>
-      <div>
-        <label>Min mentions</label>
-        <input id="minMentions" type="number" value="1" min="1" style="width:90px" />
-      </div>
-      <button id="go">Search</button>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <label style="display:flex; align-items:center; gap:7px; margin:0; cursor:pointer; font-size:13px; color:var(--text)">
-        <input type="checkbox" id="fullText" checked style="width:16px; height:16px" />
-        Mine full text of open-access papers (more genes; a little slower)
-      </label>
-    </div>
-    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code> or <code>S. aureus</code>) keeps only genes whose NCBI Gene record matches — abbreviations, common names, and genus-only names (<code>Brugia</code>) all work. Results stream in as each gene resolves.</div>
+    </details>
   </div>
 
   <div id="status" class="status"></div>
   <div id="bar" class="bar"><span id="barFill"></span></div>
 
-  <div id="results" class="card" style="display:none">
-    <div id="meta" class="meta"></div>
-    <div class="toolbar">
-      <button class="ghost" id="exportFasta">Download nucleotide FASTA</button>
-      <button class="ghost" id="exportProtFasta">Download protein FASTA</button>
-      <button class="ghost" id="exportCsv">Download CSV</button>
-      <button class="ghost" id="exportBundle">Download all (zip)</button>
-      <span class="ctl">Orthologues via <b>OrthoDB</b></span>
+  <section id="results" class="panel" style="display:none">
+    <div class="panel-head split">
+      <span>Results</span>
+      <div class="head-actions">
+        <button id="exportFasta">Download nucleotide FASTA</button>
+        <button id="exportProtFasta">Download protein FASTA</button>
+        <button id="exportCsv">Download CSV</button>
+        <button id="exportBundle">Download all (zip)</button>
+      </div>
     </div>
-    <div style="overflow:auto; max-height:70vh">
-      <table id="table">
-        <thead>
-          <tr>
-            <th data-k="symbol">Gene</th>
-            <th data-k="description">Description</th>
-            <th data-k="organism">Organism</th>
-            <th data-k="mention_count"># Mentions</th>
-            <th data-k="paper_count"># Papers</th>
-            <th>Papers (PMID)</th>
-            <th>Nucleotide sequence</th>
-            <th>Protein (UniProt)</th>
-            <th>Function</th>
-            <th>Orthologues</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
+    <div class="panel-body">
+      <div id="meta" class="meta"></div>
+      <div class="ctl">Orthologues via <b>OrthoDB</b></div>
+      <div style="overflow:auto; max-height:70vh">
+        <table id="table">
+          <thead>
+            <tr>
+              <th data-k="symbol">Gene</th>
+              <th data-k="description">Description</th>
+              <th data-k="organism">Organism</th>
+              <th data-k="mention_count" title="Total times the gene was named across all scanned papers"># Mentions</th>
+              <th data-k="paper_count" title="Number of different papers that name the gene"># Papers</th>
+              <th>Papers (PMID)</th>
+              <th>Nucleotide sequence</th>
+              <th>Protein (UniProt)</th>
+              <th>Function</th>
+              <th>Orthologues</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </section>
 </main>
 
 <script>
@@ -260,7 +349,7 @@ function updateMeta() {
     `<span><b>${withProt}</b> protein</span>` +
     `<span>source: <code>${escapeHtml(DATA.source || "pubmed")}</code></span>` +
     `<span>term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>` +
-    (DATA.note ? `<span>Note: ${escapeHtml(DATA.note)}</span>` : "");
+    (DATA.note ? `<span class="note">Note: ${escapeHtml(DATA.note)}</span>` : "");
 }
 
 function renderRows() {
@@ -525,6 +614,10 @@ document.querySelectorAll("th[data-k]").forEach((th) => {
     renderRows();
   });
 });
+
+// The "?" help buttons show their tooltip on hover/focus; give each the same
+// text as an accessible name so screen readers announce it too.
+document.querySelectorAll(".help").forEach((h) => h.setAttribute("aria-label", h.dataset.tip));
 
 $("go").addEventListener("click", runSearch);
 $("exportFasta").addEventListener("click", exportFasta);
