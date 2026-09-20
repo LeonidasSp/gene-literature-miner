@@ -10,10 +10,10 @@ and **cross-species homologues** — all from open databases, no API key require
 
 **🔴 Live app:** **https://leonsp-gene-literature-miner.hf.space** — nothing to install.
 
-![Gene Literature Miner — a results table streaming in gene sequences, annotations, and orthologues](docs/screenshot.png)
+![Search results for biofilm formation in Escherichia coli: genes with mention counts, nucleotide and protein sequences, GO terms, Pfam domains and an orthologue button](docs/screenshot.png)
 
-**Example:** search *biofilm formation* in *Staphylococcus aureus* → the tool
-finds the genes discussed in the literature (e.g. `icaA`, `sarA`, `agr`, `hla`…),
+**Example:** search *biofilm formation* in *Escherichia coli* → the tool
+finds the genes discussed in the literature (e.g. `yeeJ`, `oxyR`, `katG`, `pnp`…),
 links each to its NCBI Gene page, and streams in the DNA/protein sequences,
 GO/Pfam/KEGG annotation, and homologues across related species.
 
@@ -114,6 +114,8 @@ naive comparisons misleading:
 - **Literature** — is the gene *named in the papers scanned for that organism*?
 - **Orthology** — does the organism have a member of the gene's **OrthoDB ortholog
   group** at all, whether or not those papers happen to name it?
+
+![Comparison of biofilm genes across Escherichia coli, Salmonella enterica and Klebsiella pneumoniae, showing literature mentions and OrthoDB orthologue presence](docs/compare.png)
 
 Every cell is therefore one of: **N mentions** (named in that organism's papers),
 **ortholog present** (not named, but OrthoDB lists a member there), **none in OrthoDB**,
