@@ -399,7 +399,12 @@ while ((Get-Date) -lt $deadline) {
 }
 if ($live) {
     Write-Host ""
-    Write-Host "LIVE: $spaceUrl is serving the new version." -ForegroundColor Green
+    if ($canFingerprint) {
+        Write-Host "LIVE: $spaceUrl is serving the new version (its page matches the deployed index.html)." -ForegroundColor Green
+    } else {
+        # Only /health could be checked, so do not claim more than that.
+        Write-Host "HEALTHY: $spaceUrl is up. (This deploy did not change the frontend, so 'serving the new version' cannot be told apart from 'still the old one'; rebuilds normally take a minute or two.)" -ForegroundColor Green
+    }
     exit 0
 }
 Write-Warn "Gave up waiting after 10 minutes. The push succeeded; the Space may still be rebuilding. Check $spaceUrl (or its Settings > Restart)."
