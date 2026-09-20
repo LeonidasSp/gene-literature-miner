@@ -269,6 +269,7 @@ async def _collect_genes(
             "taxid": str((summ.get("organism") or {}).get("taxid") or ""),
             "mention_count": entry["count"],
             "paper_count": len(entry["pmids"]),
+            "snippets": entry.get("snippets", []),
             "pmids": sorted(entry["pmids"], key=int, reverse=True),
             "gene_url": f"https://www.ncbi.nlm.nih.gov/gene/{gid}",
             "sequence": None,

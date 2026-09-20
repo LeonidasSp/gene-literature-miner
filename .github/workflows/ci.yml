@@ -22,6 +22,8 @@ jobs:
       - name: Import the FastAPI app
         working-directory: backend
         run: python -c "import main; print('app import OK')"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
 
   frontend:
     name: Frontend JS syntax

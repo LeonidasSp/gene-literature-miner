@@ -122,7 +122,8 @@
   .sym { font-weight: bold; }
   .pill { display: inline-block; background: #f3f3f3; border: 1px solid #bdbdbd; border-radius: 3px;
           padding: 0 6px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
-  .seqbtn, .homobtn { font-size: 11px; padding: 3px 8px; }
+  .seqbtn, .homobtn, .ctxbtn { font-size: 11px; padding: 3px 8px; }
+  .ctxbtn { margin-top: 4px; }
   .noseq { color: var(--muted); font-size: 12px; }
   .why { color: var(--orange-text); cursor: help; font-size: 11px; border-bottom: 2px dotted var(--orange-text); }
   .spin { color: var(--muted); font-size: 12px; font-style: italic; }
@@ -137,6 +138,18 @@
   .homobox { display: none; margin-top: 6px; font-size: 12px; }
   .homobox table { margin: 0; font-size: 12px; }
   .homobox td { padding: 4px 8px; }
+
+  /* Mention context: a full-width row under the gene, with highlighted sentences. */
+  tr.ctxrow td, tr.ctxrow:hover td { background: #fafcfe; padding: 0; }
+  .ctxbox { position: sticky; left: 0; padding: 10px 14px 12px; border-left: 4px solid var(--blue); font-size: 13px; }
+  .ctxhead { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .snip { margin: 0 0 10px; }
+  .snip:last-child { margin-bottom: 0; }
+  .snip-src { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .snip-src .sec { font-weight: bold; color: var(--text); }
+  .snip-text { line-height: 1.5; }
+  mark { background: var(--orange-tint); color: var(--text); font-weight: bold;
+         border-bottom: 2px solid var(--orange-text); padding: 0 1px; }
   code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; font-family: "Courier New", Courier, monospace; }
 </style>
 </head>
@@ -372,7 +385,10 @@ function renderRows() {
       `<div>${aliases}</div></td>` +
       `<td>${escapeHtml(g.description || "")}</td>` +
       `<td><i>${escapeHtml(g.organism || "")}</i></td>` +
-      `<td>${g.mention_count}</td>` +
+      `<td>${g.mention_count}` +
+        ((g.snippets || []).length
+          ? `<div><button class="ctxbtn" onclick="toggleContext('${g.gene_id}')">context</button></div>` : "") +
+      `</td>` +
       `<td>${g.paper_count}</td>` +
       `<td>${pmids}</td>` +
       `<td id="seq_${g.gene_id}">${seqCell(g)}</td>` +
@@ -477,6 +493,51 @@ function toggleBox(id) {
   const el = $(id);
   el.style.display = el.style.display === "block" ? "none" : "block";
 }
+
+// Wrap each highlighted range in <mark>, escaping everything else. Ranges are
+// [start, end) offsets into `text`; overlapping or out-of-range ones are skipped.
+function markedText(text, marks) {
+  let out = "", pos = 0;
+  [...(marks || [])].sort((a, b) => a[0] - b[0]).forEach(([s, e]) => {
+    if (s < pos || e > text.length || e <= s) return;
+    out += escapeHtml(text.slice(pos, s)) + "<mark>" + escapeHtml(text.slice(s, e)) + "</mark>";
+    pos = e;
+  });
+  return out + escapeHtml(text.slice(pos));
+}
+
+function snippetHtml(s) {
+  const paper = `<a href="https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(s.pmid)}/" target="_blank" rel="noopener">PMID ${escapeHtml(s.pmid)}</a>`;
+  return `<div class="snip"><div class="snip-src"><span class="sec">${escapeHtml(s.section)}</span> · ${paper}` +
+    (s.title ? ` · <i>${escapeHtml(s.title)}</i>` : "") + `</div>` +
+    `<div class="snip-text">${markedText(s.text, s.marks)}</div></div>`;
+}
+
+// Show / hide the example sentences for a gene as a full-width row under it.
+function toggleContext(geneId) {
+  const open = $("ctx_" + geneId);
+  if (open) { open.remove(); return; }
+  const row = $("r_" + geneId);
+  const g = (DATA.genes || []).find((x) => x.gene_id === geneId);
+  if (!row || !g || !(g.snippets || []).length) return;
+  const tr = document.createElement("tr");
+  tr.id = "ctx_" + geneId;
+  tr.className = "ctxrow";
+  tr.innerHTML = `<td colspan="10"><div class="ctxbox">` +
+    `<div class="ctxhead">${escapeHtml(g.symbol)} is named ${g.mention_count} time(s) in ${g.paper_count} paper(s); ` +
+    `showing ${g.snippets.length} example sentence(s), the gene highlighted.</div>` +
+    g.snippets.map(snippetHtml).join("") + `</div></td>`;
+  row.after(tr);
+  fitContextBoxes();
+}
+
+// The table can be wider than the area it scrolls in. Keep each context box as
+// wide as the visible area (pinned to the left) so it reads without side-scrolling.
+function fitContextBoxes() {
+  const w = $("table").parentElement.clientWidth;
+  document.querySelectorAll(".ctxbox").forEach((b) => { b.style.width = w + "px"; });
+}
+window.addEventListener("resize", fitContextBoxes);
 
 const HOMO_CACHE = {};
 async function fetchHomologs(geneId) {

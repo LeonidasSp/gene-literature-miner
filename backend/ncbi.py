@@ -14,7 +14,9 @@ from typing import Any, Optional
 
 import httpx
 
-EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+import snippets
+
+EUTILS ="https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 PUBTATOR = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 
 TOOL_NAME = "gene-literature-miner"
@@ -106,8 +108,9 @@ class NCBIClient:
         self, pmids: list[str], *, full_text: bool = False
     ) -> dict[str, dict[str, Any]]:
         """
-        Return {gene_id: {"mentions": set(text), "pmids": set(pmid), "count": int}}
-        by asking PubTator3 for gene annotations on the given PMIDs.
+        Return {gene_id: {"mentions": {text: n}, "pmids": set(pmid), "count": int,
+        "snippets": [...]}} by asking PubTator3 for gene annotations on the given
+        PMIDs. `snippets` are a few example sentences (see snippets.py).
 
         When `full_text` is set, PubTator annotates the full body of any article
         available in PMC's open-access subset (not just the abstract), which
@@ -128,26 +131,9 @@ class NCBIClient:
             except RuntimeError:
                 continue
             for doc in _iter_bioc_docs(resp.text):
-                pmid = _doc_pmid(doc)
-                for ann in _iter_annotations(doc):
-                    infons = ann.get("infons", {})
-                    if str(infons.get("type", "")).lower() != "gene":
-                        continue
-                    ident = infons.get("identifier") or infons.get("normalized_id")
-                    if not ident:
-                        continue
-                    text = (ann.get("text") or "").strip()
-                    for gid in _split_ids(str(ident)):
-                        if not gid.isdigit():
-                            continue
-                        entry = genes.setdefault(
-                            gid, {"mentions": {}, "pmids": set(), "count": 0}
-                        )
-                        entry["count"] += 1
-                        if text:
-                            entry["mentions"][text] = entry["mentions"].get(text, 0) + 1
-                        if pmid:
-                            entry["pmids"].add(pmid)
+                absorb_document(genes, doc)
+        for entry in genes.values():
+            entry["snippets"] = entry.pop("_snips").pick()
         return genes
 
     # ------------------------------------------------------------------ Gene db
@@ -429,10 +415,77 @@ def _iter_bioc_docs(text: str):
             continue
 
 
-def _iter_annotations(doc: dict[str, Any]):
-    for passage in doc.get("passages", []) or []:
-        for ann in passage.get("annotations", []) or []:
-            yield ann
+def absorb_document(genes: dict[str, dict[str, Any]], doc: dict[str, Any]) -> None:
+    """Fold one PubTator3 document's gene annotations into `genes`.
+
+    Counts every mention in the paper's own text -- the reference list of a
+    full-text document is skipped, since a gene named in a cited title is not
+    discussed by the paper -- and collects example sentences for each gene.
+    """
+    pmid = _doc_pmid(doc)
+    title = snippets.doc_title(doc)
+    for passage_no, passage in enumerate(doc.get("passages") or []):
+        section = snippets.passage_section(passage)
+        if section == snippets.REFERENCES:
+            continue
+        ptext = passage.get("text") or ""
+        poffset = int(passage.get("offset") or 0)
+        wants_snippets = (
+            bool(ptext) and section in snippets.SECTIONS and not snippets.is_heading(passage)
+        )
+        spans = None  # sentence spans of this passage, computed on first use
+        for ann in passage.get("annotations") or []:
+            infons = ann.get("infons", {})
+            if str(infons.get("type", "")).lower() != "gene":
+                continue
+            ident = infons.get("identifier") or infons.get("normalized_id")
+            if not ident:
+                continue
+            text = (ann.get("text") or "").strip()
+            for gid in _split_ids(str(ident)):
+                if not gid.isdigit():
+                    continue
+                entry = genes.setdefault(
+                    gid,
+                    {"mentions": {}, "pmids": set(), "count": 0,
+                     "_snips": snippets.SnippetCollector()},
+                )
+                entry["count"] += 1
+                if text:
+                    entry["mentions"][text] = entry["mentions"].get(text, 0) + 1
+                if pmid:
+                    entry["pmids"].add(pmid)
+                if not (pmid and wants_snippets):
+                    continue
+                mark = _mention_span(ann, ptext, poffset)
+                if mark is None:
+                    continue
+                if spans is None:
+                    spans = snippets.split_sentences(ptext)
+                sent = snippets.sentence_at(spans, mark[0])
+                if sent is None or mark[1] > sent[1]:
+                    continue
+                entry["_snips"].add(
+                    pmid=pmid, title=title, section=section, passage_no=passage_no,
+                    sent_start=sent[0], sentence=ptext[sent[0]:sent[1]],
+                    mark=(mark[0] - sent[0], mark[1] - sent[0]),
+                )
+
+
+def _mention_span(ann: dict[str, Any], ptext: str, poffset: int) -> Optional[tuple[int, int]]:
+    """Where an annotation sits inside its passage's text, or None if it doesn't
+    line up (offsets are document-wide, so subtract the passage offset)."""
+    try:
+        loc = (ann.get("locations") or [])[0]
+        start = int(loc["offset"]) - poffset
+        end = start + int(loc["length"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+    if start < 0 or end > len(ptext) or end <= start:
+        return None
+    if ptext[start:end].strip().lower() != (ann.get("text") or "").strip().lower():
+        return None  # never highlight the wrong words
+    return start, end
 
 
 def _doc_pmid(doc: dict[str, Any]) -> Optional[str]:

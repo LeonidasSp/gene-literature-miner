@@ -94,7 +94,11 @@ Enter a **topic** (e.g. `biofilm formation`), optionally an **organism**
 A sortable table of genes with the literature aliases, PMIDs, nucleotide and
 protein sequences (each labelled with its source database), a **Function** column
 (EC / family / keywords / Pfam / GO / KEGG), and a **Find orthologues** expander
-per gene (OrthoDB). Export buttons:
+per gene (OrthoDB). The **context** button next to a gene's mention count shows
+example sentences from the papers that name it, with the gene highlighted, the
+section (abstract, results, …) and a PubMed link — so you can judge relevance
+without opening each paper. Only the paper's own text is counted (reference lists
+are skipped). Export buttons:
 
 - **Nucleotide FASTA** / **Protein FASTA**
 - **CSV** (gene + sequence + protein summary)
