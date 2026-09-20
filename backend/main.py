@@ -28,7 +28,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -38,7 +38,8 @@ from cache import Cache
 from ensembl import EnsemblClient
 from europepmc import EuropePMCClient
 from ncbi import NCBIClient, is_locus_tag
-from orthodb import OrthoDBClient
+import compare
+from orthodb import DOMAIN_LEVELS, OrthoDBClient, OrthoDBUnavailable
 from uniprot import UniProtClient
 import veupathdb
 import wormbase
@@ -69,7 +70,7 @@ async def lifespan(app: FastAPI):
     client = NCBIClient()
     uniprot = UniProtClient(cache=cache)
     europepmc = EuropePMCClient()
-    orthodb = OrthoDBClient()
+    orthodb = OrthoDBClient(cache=cache)
     bvbrc = BVBRCClient(cache=cache)
     ensembl = EnsemblClient(cache=cache)
     try:
@@ -90,7 +91,7 @@ app = FastAPI(title="Gene Literature Miner", lifespan=lifespan)
 @app.middleware("http")
 async def throttle(request: Request, call_next):
     """Simple per-IP throttle on the search endpoints."""
-    if request.url.path.startswith("/api/search"):
+    if request.url.path.startswith(("/api/search", "/api/compare")):
         ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
               or (request.client.host if request.client else "?"))
         now = time.monotonic()
@@ -269,6 +270,7 @@ async def _collect_genes(
             "taxid": str((summ.get("organism") or {}).get("taxid") or ""),
             "mention_count": entry["count"],
             "paper_count": len(entry["pmids"]),
+            "snippets": entry.get("snippets", []),
             "pmids": sorted(entry["pmids"], key=int, reverse=True),
             "gene_url": f"https://www.ncbi.nlm.nih.gov/gene/{gid}",
             "sequence": None,
@@ -508,17 +510,254 @@ async def search_stream(
     )
 
 
+# ---------------------------------------------------------- compare organisms
+MAX_COMPARE_ORGANISMS = int(os.environ.get("MAX_COMPARE_ORGANISMS", "5"))
+# Simultaneous literature scans / OrthoDB lookups. OrthoDB answered with unreadable
+# pages when hit 4-at-a-time and never at 2, so it stays at 2; UniProt has no such
+# problem (and its client already spaces requests), so it can go wider.
+COMPARE_PARALLEL = 2
+UNIPROT_PARALLEL = 4
+_DOMAIN_NAMES = {"bacteria": "Bacteria", "archaea": "Archaea", "eukaryote": "Eukaryota"}
+
+
+async def _resolve_for_compare(typed: str) -> dict[str, Any]:
+    """What we know about a typed organism: its canonical name, its species-level
+    taxid (what OrthoDB filters on; strains/serovars are mapped up to their
+    species) and its domain of life. Every field degrades to None."""
+    info: dict[str, Any] = {"typed": typed, "label": typed, "taxid": None, "domain": None}
+    lineage_taxid = None
+    resolved = await client.resolve_organism(typed)
+    if resolved and resolved.get("name"):
+        info["label"] = resolved["name"]
+        lineage_taxid = resolved["taxid"]
+        species = await client.species_of(resolved["taxid"])
+        if species:
+            info["label"], info["taxid"], lineage_taxid = species["name"], species["taxid"], species["taxid"]
+    if lineage_taxid:
+        try:
+            domain = _classify(await client.lineage(lineage_taxid), info["label"])
+            # _classify separates parasitic helminths for sequence routing; for
+            # orthology they are simply eukaryotes.
+            info["domain"] = "eukaryote" if domain == "helminth" else domain
+        except Exception:
+            pass
+    return info
+
+
+async def _scan_organism(info: dict[str, Any], query: str, max_papers: int,
+                         min_mentions: int, source: str, full_text: bool) -> dict[str, Any]:
+    """The literature half: the same pipeline as a normal search, for one organism."""
+    req = SearchRequest(query=query, organism=info["label"], max_papers=max_papers,
+                        min_mentions=min_mentions, source=source, full_text=full_text)
+    out: dict[str, Any] = {"label": info["label"], "genes": [], "papers": 0, "note": None, "error": None}
+    try:
+        genes, _term, papers, _message, note = await _collect_genes(req)
+    except Exception:
+        out["error"] = "The literature search failed for this organism."
+        return out
+    out.update(genes=genes, papers=papers, note=note)
+    if not info["taxid"]:  # name didn't resolve: fall back to what the gene records say
+        out["fallback_taxid"] = compare.common_taxid(genes)
+    return out
+
+
+async def _link_gene(uni_sem: asyncio.Semaphore, odb_sem: asyncio.Semaphore,
+                     label: str, gene: dict[str, Any], level: int) -> None:
+    """Place one gene in its OrthoDB ortholog group: gene -> UniProt protein ->
+    exact group by accession. Sets gene["og"] when found, else gene["og_status"]
+    (no_protein / no_group / unavailable) saying why not. Never raises."""
+    async with uni_sem:
+        try:
+            protein = await uniprot.protein_for_gene(
+                gene_id=gene["gene_id"], candidates=gene.get("_candidates", []),
+                organism=gene.get("organism") or label)
+        except Exception:
+            protein = None
+    if not protein or not protein.get("accession"):
+        gene["og_status"] = "no_protein"
+        return
+    async with odb_sem:
+        try:
+            group = await orthodb.group_for_accession(protein["accession"], level)
+        except OrthoDBUnavailable:
+            gene["og_status"] = "unavailable"
+            return
+    if group:
+        gene["og"] = group
+    else:
+        gene["og_status"] = "no_group"
+
+
+async def _check_presence(sem: asyncio.Semaphore, group_id: str, org: dict[str, Any]):
+    async with sem:
+        try:
+            return (group_id, org["label"]), await orthodb.members_in_species(group_id, org["taxid"])
+        except OrthoDBUnavailable:
+            return (group_id, org["label"]), "unavailable"
+
+
+@app.get("/api/compare/stream")
+async def compare_stream(
+    query: str,
+    organism: list[str] = Query(default=[]),
+    max_papers: int = 30,
+    min_mentions: int = 1,
+    genes_per_organism: int = 15,
+    source: str = "pubmed",
+    full_text: bool = True,
+):
+    """Server-Sent Events: compare one topic across several organisms.
+
+    Stages: resolve organisms -> literature scan per organism -> link each
+    organism's top genes to OrthoDB ortholog groups -> ask OrthoDB whether the
+    *other* organisms have a member of each group -> matrix (see compare.py).
+    """
+    try:
+        typed = compare.parse_organisms(organism, MAX_COMPARE_ORGANISMS)
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+    if not query.strip():
+        return JSONResponse(status_code=400, content={"detail": "Enter a topic to search."})
+    max_papers = max(1, min(max_papers, 100))
+    min_mentions = max(1, min_mentions)
+    genes_per_organism = max(1, min(genes_per_organism, compare.MAX_TOP_GENES))
+
+    async def gen():
+        tasks: list[asyncio.Task] = []
+        async with _search_gate:
+            try:
+                # 1. Who are we comparing?
+                infos: list[dict[str, Any]] = []
+                for name in typed:
+                    info = await _resolve_for_compare(name)
+                    if any(i["label"].lower() == info["label"].lower() for i in infos):
+                        yield _sse("error", {"detail": f"“{name}” is the same organism as another one you entered "
+                                                       f"({info['label']}). Enter each organism once."})
+                        return
+                    infos.append(info)
+                domains = {i["domain"] for i in infos if i["domain"]}
+                level = None
+                level_name = None
+                notices: list[str] = []
+                if len(domains) == 1 and next(iter(domains)) in DOMAIN_LEVELS:
+                    level = DOMAIN_LEVELS[next(iter(domains))]
+                    level_name = _DOMAIN_NAMES[next(iter(domains))]
+                elif len(domains) > 1:
+                    notices.append("These organisms are from different domains of life, so orthology "
+                                   "cannot be compared; only the literature is shown.")
+                elif domains:
+                    notices.append("Orthology is not available for this kind of organism; only the "
+                                   "literature is shown.")
+                else:
+                    notices.append("The organism names could not be resolved, so orthology was not checked.")
+                yield _sse("meta", {
+                    "query": query, "genes_per_organism": genes_per_organism,
+                    "organisms": [{"label": i["label"], "taxid": i["taxid"], "domain": i["domain"]} for i in infos],
+                    "level": level_name,
+                })
+
+                # 2. What does the literature say about each?
+                sem = asyncio.Semaphore(COMPARE_PARALLEL)
+
+                async def scan(info):
+                    async with sem:
+                        return await _scan_organism(info, query, max_papers, min_mentions, source, full_text)
+
+                tasks = [asyncio.create_task(scan(i)) for i in infos]
+                scans: dict[str, dict[str, Any]] = {}
+                for finished in asyncio.as_completed(tasks):
+                    res = await finished
+                    scans[res["label"]] = res
+                    yield _sse("organism", {"label": res["label"], "papers": res["papers"],
+                                            "genes_found": len(res["genes"]), "note": res["note"], "error": res["error"]})
+                for info in infos:
+                    if not info["taxid"] and scans[info["label"]].get("fallback_taxid"):
+                        sp = await client.species_of(scans[info["label"]]["fallback_taxid"])
+                        info["taxid"] = sp["taxid"] if sp else None
+
+                selected = {i["label"]: compare.top_genes(scans[i["label"]]["genes"], genes_per_organism) for i in infos}
+
+                # 3. Place each selected gene in its OrthoDB ortholog group.
+                presence: dict[tuple[str, str], Any] = {}
+                if level:
+                    work = [(i["label"], g) for i in infos for g in selected[i["label"]]]
+                    uni_sem = asyncio.Semaphore(UNIPROT_PARALLEL)
+                    tasks = [asyncio.create_task(_link_gene(uni_sem, sem, lab, g, level)) for lab, g in work]
+                    done = 0
+                    for finished in asyncio.as_completed(tasks):
+                        await finished
+                        done += 1
+                        yield _sse("stage", {"stage": "link", "done": done, "total": len(work)})
+
+                    # 4. Does each *other* organism have a member of each group?
+                    covered: dict[str, set[str]] = {}
+                    for label, genes in selected.items():
+                        for g in genes:
+                            if g.get("og"):
+                                covered.setdefault(g["og"]["id"], set()).add(label)
+                    pairs = [(gid, i) for gid, labels in covered.items() for i in infos
+                             if i["label"] not in labels and i["taxid"]]
+                    tasks = [asyncio.create_task(_check_presence(sem, gid, i)) for gid, i in pairs]
+                    done = 0
+                    for finished in asyncio.as_completed(tasks):
+                        key, value = await finished
+                        presence[key] = value
+                        done += 1
+                        yield _sse("stage", {"stage": "presence", "done": done, "total": len(pairs)})
+
+                # 5. Put it together.
+                organisms = [{
+                    "label": i["label"], "taxid": i["taxid"], "papers": scans[i["label"]]["papers"],
+                    "genes_found": len(scans[i["label"]]["genes"]),
+                    "genes_compared": len(selected[i["label"]]),
+                    "sparse": compare.is_sparse(scans[i["label"]]["papers"], len(scans[i["label"]]["genes"])),
+                    "note": scans[i["label"]]["note"], "error": scans[i["label"]]["error"],
+                    "orthology_checked": bool(level and i["taxid"]),
+                } for i in infos]
+                result = compare.build_comparison(organisms, selected, presence)
+                result.update(query=query, genes_per_organism=genes_per_organism,
+                              level=level_name, notices=notices)
+                yield _sse("matrix", result)
+                yield _sse("done", {"groups": result["summary"]["groups"]})
+            except Exception:  # surface, don't hang the client
+                yield _sse("error", {"detail": "The comparison failed unexpectedly. Please try again."})
+            finally:
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 # ------------------------------------------------------------------- homologues
 @app.get("/api/homologs")
 async def homologs(
     name: str = "",
     organism: str = "",
     limit: int = 25,
+    accession: str = "",
+    taxid: str = "",
 ) -> dict[str, Any]:
-    """Cross-species orthologues from OrthoDB (ortholog group for a gene name)."""
+    """Cross-species orthologues from OrthoDB.
+
+    Given the gene's UniProt `accession` (and organism `taxid`) the ortholog group
+    is looked up exactly; a name search, which can only guess among several
+    candidate groups, is the fallback.
+    """
     limit = max(1, min(limit, 50))
+    level = None
+    if accession.strip() and taxid.strip():
+        try:
+            level = DOMAIN_LEVELS.get(_classify(await client.lineage(taxid), organism))
+        except Exception:
+            level = None
     try:
-        result = await orthodb.orthologs(name=name, organism=organism, limit=limit)
+        result = await orthodb.orthologs(
+            name=name, organism=organism, limit=limit, accession=accession, level=level)
     except Exception:
         return {"homologs": [], "message": "Orthologue lookup failed.", "source": "orthodb"}
     result["source"] = "orthodb"

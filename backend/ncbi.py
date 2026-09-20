@@ -14,7 +14,9 @@ from typing import Any, Optional
 
 import httpx
 
-EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+import snippets
+
+EUTILS ="https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 PUBTATOR = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 
 TOOL_NAME = "gene-literature-miner"
@@ -51,6 +53,7 @@ class NCBIClient:
         self._limiter = RateLimiter(_MIN_INTERVAL)
         self._tax_cache: dict[str, str] = {}
         self._org_cache: dict[str, Any] = {}
+        self._species_cache: dict[str, Optional[dict[str, str]]] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -106,8 +109,9 @@ class NCBIClient:
         self, pmids: list[str], *, full_text: bool = False
     ) -> dict[str, dict[str, Any]]:
         """
-        Return {gene_id: {"mentions": set(text), "pmids": set(pmid), "count": int}}
-        by asking PubTator3 for gene annotations on the given PMIDs.
+        Return {gene_id: {"mentions": {text: n}, "pmids": set(pmid), "count": int,
+        "snippets": [...]}} by asking PubTator3 for gene annotations on the given
+        PMIDs. `snippets` are a few example sentences (see snippets.py).
 
         When `full_text` is set, PubTator annotates the full body of any article
         available in PMC's open-access subset (not just the abstract), which
@@ -128,26 +132,9 @@ class NCBIClient:
             except RuntimeError:
                 continue
             for doc in _iter_bioc_docs(resp.text):
-                pmid = _doc_pmid(doc)
-                for ann in _iter_annotations(doc):
-                    infons = ann.get("infons", {})
-                    if str(infons.get("type", "")).lower() != "gene":
-                        continue
-                    ident = infons.get("identifier") or infons.get("normalized_id")
-                    if not ident:
-                        continue
-                    text = (ann.get("text") or "").strip()
-                    for gid in _split_ids(str(ident)):
-                        if not gid.isdigit():
-                            continue
-                        entry = genes.setdefault(
-                            gid, {"mentions": {}, "pmids": set(), "count": 0}
-                        )
-                        entry["count"] += 1
-                        if text:
-                            entry["mentions"][text] = entry["mentions"].get(text, 0) + 1
-                        if pmid:
-                            entry["pmids"].add(pmid)
+                absorb_document(genes, doc)
+        for entry in genes.values():
+            entry["snippets"] = entry.pop("_snips").pick()
         return genes
 
     # ------------------------------------------------------------------ Gene db
@@ -191,6 +178,27 @@ class NCBIClient:
             lin = f"{lin}; {n.group(1).strip()}"
         self._tax_cache[taxid] = lin
         return lin
+
+    async def species_of(self, taxid: str) -> Optional[dict[str, str]]:
+        """The species a taxid belongs to, as {"taxid", "name"} -- the taxid itself
+        if it is already a species, its species ancestor for a strain / subspecies /
+        serovar, or None for a genus or anything broader. Cached; None on error."""
+        taxid = str(taxid or "").strip()
+        if not taxid:
+            return None
+        if taxid in self._species_cache:
+            return self._species_cache[taxid]
+        result: Optional[dict[str, str]] = None
+        try:
+            resp = await self._get(
+                f"{EUTILS}/efetch.fcgi",
+                {**self._common(), "db": "taxonomy", "id": taxid, "retmode": "xml"},
+            )
+            result = species_from_taxonomy_xml(resp.text)
+        except RuntimeError:
+            return None  # transient failure: don't cache it
+        self._species_cache[taxid] = result
+        return result
 
     async def resolve_organism(self, text: str) -> Optional[dict[str, str]]:
         """
@@ -429,10 +437,100 @@ def _iter_bioc_docs(text: str):
             continue
 
 
-def _iter_annotations(doc: dict[str, Any]):
-    for passage in doc.get("passages", []) or []:
-        for ann in passage.get("annotations", []) or []:
-            yield ann
+_TAXON_RE = re.compile(
+    r"<Taxon>\s*<TaxId>(\d+)</TaxId>\s*<ScientificName>(.*?)</ScientificName>"
+    r"(?:.*?)<Rank>(.*?)</Rank>", re.S)
+_LINEAGE_TAXON_RE = re.compile(
+    r"<Taxon>\s*<TaxId>(\d+)</TaxId>\s*<ScientificName>(.*?)</ScientificName>"
+    r"\s*<Rank>(.*?)</Rank>\s*</Taxon>", re.S)
+
+
+def species_from_taxonomy_xml(xml: str) -> Optional[dict[str, str]]:
+    """Species {"taxid", "name"} for an NCBI Taxonomy efetch record: the record
+    itself if its rank is species, else its species ancestor, else None."""
+    own = _TAXON_RE.search(xml or "")
+    if not own:
+        return None
+    if own.group(3).strip() == "species":
+        return {"taxid": own.group(1), "name": own.group(2).strip()}
+    lineage = re.search(r"<LineageEx>(.*?)</LineageEx>", xml, re.S)
+    for tid, name, rank in _LINEAGE_TAXON_RE.findall(lineage.group(1) if lineage else ""):
+        if rank.strip() == "species":
+            return {"taxid": tid, "name": name.strip()}
+    return None
+
+
+def absorb_document(genes: dict[str, dict[str, Any]], doc: dict[str, Any]) -> None:
+    """Fold one PubTator3 document's gene annotations into `genes`.
+
+    Counts every mention in the paper's own text -- the reference list of a
+    full-text document is skipped, since a gene named in a cited title is not
+    discussed by the paper -- and collects example sentences for each gene.
+    """
+    pmid = _doc_pmid(doc)
+    title = snippets.doc_title(doc)
+    for passage_no, passage in enumerate(doc.get("passages") or []):
+        section = snippets.passage_section(passage)
+        if section == snippets.REFERENCES:
+            continue
+        ptext = passage.get("text") or ""
+        poffset = int(passage.get("offset") or 0)
+        wants_snippets = (
+            bool(ptext) and section in snippets.SECTIONS and not snippets.is_heading(passage)
+        )
+        spans = None  # sentence spans of this passage, computed on first use
+        for ann in passage.get("annotations") or []:
+            infons = ann.get("infons", {})
+            if str(infons.get("type", "")).lower() != "gene":
+                continue
+            ident = infons.get("identifier") or infons.get("normalized_id")
+            if not ident:
+                continue
+            text = (ann.get("text") or "").strip()
+            for gid in _split_ids(str(ident)):
+                if not gid.isdigit():
+                    continue
+                entry = genes.setdefault(
+                    gid,
+                    {"mentions": {}, "pmids": set(), "count": 0,
+                     "_snips": snippets.SnippetCollector()},
+                )
+                entry["count"] += 1
+                if text:
+                    entry["mentions"][text] = entry["mentions"].get(text, 0) + 1
+                if pmid:
+                    entry["pmids"].add(pmid)
+                if not (pmid and wants_snippets):
+                    continue
+                mark = _mention_span(ann, ptext, poffset)
+                if mark is None:
+                    continue
+                if spans is None:
+                    spans = snippets.split_sentences(ptext)
+                sent = snippets.sentence_at(spans, mark[0])
+                if sent is None or mark[1] > sent[1]:
+                    continue
+                entry["_snips"].add(
+                    pmid=pmid, title=title, section=section, passage_no=passage_no,
+                    sent_start=sent[0], sentence=ptext[sent[0]:sent[1]],
+                    mark=(mark[0] - sent[0], mark[1] - sent[0]),
+                )
+
+
+def _mention_span(ann: dict[str, Any], ptext: str, poffset: int) -> Optional[tuple[int, int]]:
+    """Where an annotation sits inside its passage's text, or None if it doesn't
+    line up (offsets are document-wide, so subtract the passage offset)."""
+    try:
+        loc = (ann.get("locations") or [])[0]
+        start = int(loc["offset"]) - poffset
+        end = start + int(loc["length"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return None
+    if start < 0 or end > len(ptext) or end <= start:
+        return None
+    if ptext[start:end].strip().lower() != (ann.get("text") or "").strip().lower():
+        return None  # never highlight the wrong words
+    return start, end
 
 
 def _doc_pmid(doc: dict[str, Any]) -> Optional[str]:

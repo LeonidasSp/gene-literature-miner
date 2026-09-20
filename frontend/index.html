@@ -5,151 +5,401 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gene Literature Miner</title>
 <style>
+  /* Colour-blind-safe palette (Okabe & Ito): blue #0072B2, bluish green #009E73,
+     orange #E69F00, plus pale tints of them and neutral grays. Colour is never the
+     only signal -- badges carry text labels, links are underlined, and "reviewed"
+     vs "unreviewed" also differ in border style (solid vs dashed). */
   :root {
-    --bg: #ffffff; --panel: #ffffff; --panel2: #f2f2f2; --text: #1a1a1a;
-    --muted: #555555; --accent: #0000cc; --accent2: #006600; --border: #999999;
-    --warn: #995c00;
+    --blue: #0072b2;       --blue-dark: #005a8c;   --blue-tint: #e3f1fa;
+    --green: #009e73;      --green-text: #00634a;  --green-tint: #e3f4ee;
+    --orange: #e69f00;     --orange-text: #7a4b00; --orange-tint: #fdf1d8;
+    --bg: #f5f5f5;        --panel: #ffffff;
+    --border: #b4c7d6;    --line: #d9e2ea;
+    --text: #1a1a1a;      --muted: #505050;       --field: #8c8c8c;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: Arial, Helvetica, sans-serif;
     background: var(--bg); color: var(--text); line-height: 1.4;
   }
-  header { padding: 16px 20px 10px; border-bottom: 2px solid var(--border); }
-  h1 { margin: 0 0 4px; font-size: 20px; }
-  .sub { color: var(--muted); font-size: 13px; }
-  main { padding: 14px 20px 60px; max-width: 1320px; }
-  .card { background: var(--panel); border: 1px solid var(--border); padding: 14px; }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-  input, button, select { font: inherit; }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+  .top {
+    display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap;
+    gap: 8px 20px; padding: 18px 24px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .top h1 { margin: 0; font-size: 26px; font-weight: bold; }
+  .top nav { display: flex; gap: 18px; font-size: 14px; }
+  main { padding: 18px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  .intro { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+
+  /* Boxes: bordered, slightly rounded panels with a tinted header bar. */
+  .panels { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .p-search  { flex: 2 1 460px; }
+  .p-options { flex: 1 1 300px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 5px; }
+  .panel-head {
+    background: var(--blue-tint); border-bottom: 1px solid var(--border); border-radius: 4px 4px 0 0;
+    padding: 12px 40px; font-weight: bold; font-size: 15px; text-align: center;
+  }
+  .panel-head.split {
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+    gap: 8px 12px; text-align: left; padding: 9px 14px;
+  }
+  .head-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .panel-body { padding: 14px 16px; }
+
+  /* Collapsible panels: header bar with a triangle at the right, like an accordion. */
+  details.panel > summary.panel-head { list-style: none; cursor: pointer; position: relative; }
+  details.panel > summary.panel-head::-webkit-details-marker { display: none; }
+  details.panel > summary.panel-head::after {
+    content: ""; position: absolute; right: 16px; top: 50%; margin-top: -3px;
+    border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid var(--text);
+  }
+  details.panel:not([open]) > summary.panel-head::after {
+    margin-top: -6px; border-top: 6px solid transparent; border-bottom: 6px solid transparent;
+    border-left: 8px solid var(--text); border-right: 0;
+  }
+  details.panel:not([open]) > summary.panel-head { border-bottom-color: transparent; border-radius: 4px; }
+
+  /* Form controls */
+  .field { margin-bottom: 12px; }
+  label { display: block; font-size: 13px; font-weight: bold; margin: 0 0 4px; }
+  label.checkrow { display: flex; align-items: flex-start; gap: 8px; font-weight: normal; margin: 0; cursor: pointer; }
+  label.checkrow input { margin-top: 2px; width: 16px; height: 16px; flex: none; }
   input[type=text], input[type=number], select {
-    background: #ffffff; border: 1px solid var(--border); color: var(--text);
-    padding: 6px 8px; outline: none;
+    width: 100%; font: inherit; font-size: 14px; background: #fff; color: var(--text);
+    border: 1px solid var(--field); border-radius: 3px; padding: 7px 9px;
   }
-  input:focus, select:focus { border-color: var(--accent); }
-  .grow { flex: 1; min-width: 200px; }
+  input[type=number] { max-width: 130px; }
+  textarea {
+    width: 100%; font: inherit; font-size: 14px; background: #fff; color: var(--text);
+    border: 1px solid var(--field); border-radius: 3px; padding: 7px 9px; resize: vertical;
+  }
+  [hidden] { display: none !important; }
+
+  /* Mode tabs: rounded top corners, the active one joins the page below it. */
+  .tabs { display: flex; gap: 4px; margin: 0 0 16px; border-bottom: 1px solid var(--border); }
+  .tab {
+    background: var(--blue-tint); color: var(--text); font-size: 15px; font-weight: bold;
+    border: 1px solid var(--border); border-bottom: none; border-radius: 8px 8px 0 0;
+    padding: 10px 22px; margin-bottom: -1px; cursor: pointer;
+  }
+  .tab:hover { background: #d3e8f6; }
+  .tab[aria-selected="true"] { background: var(--panel); border-top: 3px solid var(--blue); padding-top: 8px; border-bottom: 1px solid var(--panel); }
   button {
-    background: #e6e6e6; color: #000000; border: 1px solid #666666;
-    padding: 7px 14px; font-weight: normal; cursor: pointer;
+    font: inherit; font-size: 13px; background: #f2f2f2; color: var(--text);
+    border: 1px solid var(--field); border-radius: 4px; padding: 5px 12px; cursor: pointer;
   }
-  button:hover { background: #d9d9d9; }
-  button.ghost { background: #f2f2f2; color: #000000; border: 1px solid #999999; }
+  button:hover { background: #e4e4e4; }
   button:disabled { opacity: .55; cursor: default; }
-  .status { margin: 14px 0; color: var(--muted); font-size: 13px; min-height: 20px; }
-  .bar { height: 6px; background: var(--panel2); border: 1px solid var(--border); overflow: hidden; margin: 6px 0 0; display: none; }
-  .bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s; }
-  .meta { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font-size: 12px; color: var(--muted); }
+  .btn-primary {
+    background: var(--blue); color: #fff; border: 1px solid var(--blue-dark);
+    border-radius: 8px; padding: 10px 36px; font-size: 15px; font-weight: bold;
+  }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+  .hint { font-size: 12px; color: var(--muted); }
+
+  /* Round "?" help icons with a tooltip (shows on hover and keyboard focus). */
+  .help {
+    position: relative; display: inline-block; width: 16px; height: 16px; padding: 0;
+    margin-left: 5px; vertical-align: middle; background: transparent; color: var(--muted);
+    border: 1px solid var(--muted); border-radius: 50%; font-size: 11px; font-weight: bold;
+    line-height: 14px; text-align: center; cursor: help;
+  }
+  .help:hover, .help:focus { background: transparent; color: var(--blue-dark); border-color: var(--blue-dark); }
+  .help::after {
+    content: attr(data-tip); display: none; position: absolute; z-index: 10; top: 22px; left: -6px;
+    width: 250px; padding: 8px 10px; background: #262626; color: #fff; border-radius: 4px;
+    font-size: 12px; font-weight: normal; line-height: 1.35; text-align: left; white-space: normal;
+  }
+  .help:hover::after, .help:focus::after { display: block; }
+  .help.tip-left::after { left: auto; right: -6px; }
+
+  /* Status + progress */
+  .status { margin: 14px 0 6px; color: var(--muted); font-size: 13px; min-height: 18px; }
+  .bar { height: 8px; background: #e2e8ed; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin: 0 0 14px; display: none; }
+  .bar > span { display: block; height: 100%; width: 0; background: var(--blue); transition: width .25s; }
+
+  /* Results */
+  #results { margin-top: 10px; }
+  .meta { display: flex; gap: 8px 18px; flex-wrap: wrap; margin: 0 0 6px; font-size: 12px; color: var(--muted); }
   .meta b { color: var(--text); }
-  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
-  th, td { text-align: left; padding: 6px 8px; border: 1px solid var(--border); vertical-align: top; }
-  th { color: #000000; font-weight: bold; position: sticky; top: 0; background: #e6e6e6; cursor: pointer; user-select: none; }
-  tr:nth-child(even) td { background: #f7f7f7; }
-  tr:hover td { background: #eef2f7; }
-  a { color: #0000cc; text-decoration: underline; }
-  a:hover { color: #cc0000; }
+  .meta .note { background: var(--orange-tint); color: var(--orange-text); border: 1px solid var(--orange); border-radius: 3px; padding: 0 6px; }
+  .ctl { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--blue-tint); font-weight: bold; position: sticky; top: 0; cursor: pointer; user-select: none; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #f0f7fc; }
+  a { color: var(--blue); text-decoration: underline; }
+  a:hover { color: var(--blue-dark); }
   .sym { font-weight: bold; }
-  .pill { display: inline-block; background: #f2f2f2; border: 1px solid #999999;
+  .pill { display: inline-block; background: #f3f3f3; border: 1px solid #bdbdbd; border-radius: 3px;
           padding: 0 6px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
-  .seqbtn { background: #f2f2f2; color: #000000; border: 1px solid #666666;
-            padding: 3px 8px; font-size: 11px; cursor: pointer; }
+  .seqbtn, .homobtn, .ctxbtn { font-size: 11px; padding: 3px 8px; }
+  .ctxbtn { margin-top: 4px; }
   .noseq { color: var(--muted); font-size: 12px; }
-  .why { color: var(--warn); cursor: help; font-size: 11px; border-bottom: 1px dotted var(--warn); }
+  .why { color: var(--orange-text); cursor: help; font-size: 11px; border-bottom: 2px dotted var(--orange-text); }
   .spin { color: var(--muted); font-size: 12px; font-style: italic; }
-  .badge { display: inline-block; padding: 0 5px; font-size: 10px;
-           font-weight: bold; vertical-align: middle; border: 1px solid #999999; }
-  .badge.rev { background: #eaffea; color: #006600; border-color: #006600; }
-  .badge.unrev { background: #f2f2f2; color: #555555; border-color: #999999; }
-  .badge.src { background: #eef2ff; color: #0000cc; border-color: #0000cc; cursor: help; }
-  .seqbox { display: none; background: #f7f7f7; border: 1px solid var(--border);
+  .badge { display: inline-block; padding: 0 5px; font-size: 10px; font-weight: bold; vertical-align: middle;
+           border: 1px solid var(--field); border-radius: 3px; }
+  .badge.rev   { background: var(--green-tint); color: var(--green-text); border: 1.5px solid var(--green); }
+  .badge.unrev { background: #f3f3f3; color: var(--muted); border: 1px dashed var(--field); }
+  .badge.src   { background: var(--blue-tint); color: var(--blue-dark); border-color: var(--blue); cursor: help; }
+  .seqbox { display: none; background: #f7f7f7; border: 1px solid var(--border); border-radius: 3px;
             padding: 8px; margin-top: 6px; font-family: "Courier New", Courier, monospace;
             font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
   .homobox { display: none; margin-top: 6px; font-size: 12px; }
   .homobox table { margin: 0; font-size: 12px; }
-  .homobox td { padding: 4px 8px; border: 1px solid var(--border); }
-  .homobtn { background: #f2f2f2; color: #000000; border: 1px solid #666666;
-             padding: 3px 8px; font-size: 11px; cursor: pointer; }
-  .toolbar { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; align-items: center; }
-  .ctl { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); }
-  .ctl select { padding: 4px 6px; }
-  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #dddddd; font-size: 12px; font-family: "Courier New", Courier, monospace; }
+  .homobox td { padding: 4px 8px; }
+
+  /* Mention context: a full-width row under the gene, with highlighted sentences. */
+  tr.ctxrow td, tr.ctxrow:hover td { background: #fafcfe; padding: 0; }
+  .ctxbox { position: sticky; left: 0; padding: 10px 14px 12px; border-left: 4px solid var(--blue); font-size: 13px; }
+  .ctxhead { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .ctxbox .ctxhead:not(:first-child) { margin-top: 14px; }
+  .snip { margin: 0 0 10px; }
+  .snip:last-child { margin-bottom: 0; }
+  .snip-src { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+  .snip-src .sec { font-weight: bold; color: var(--text); }
+  .snip-text { line-height: 1.5; }
+  mark { background: var(--orange-tint); color: var(--text); font-weight: bold;
+         border-bottom: 2px solid var(--orange-text); padding: 0 1px; }
+  code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; font-family: "Courier New", Courier, monospace; }
+
+  /* Organism comparison. Each cell state differs in text AND styling, never colour alone:
+     literature = bold text on a tint; ortholog = dashed left edge; none = grey "none";
+     not checked = italic. */
+  #cNotices .note { display: block; margin: 0 0 6px; padding: 4px 8px; font-size: 12px;
+                    background: var(--orange-tint); color: var(--orange-text);
+                    border: 1px solid var(--orange); border-radius: 3px; }
+  .cmp-orgs { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .cmp-orgs div { margin: 1px 0; }
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 8px; }
+  .filters label { margin: 0; }
+  .filters select, .filters input { width: auto; min-width: 190px; padding: 5px 8px; font-size: 13px; }
+  .howto { font-size: 12px; margin: 0 0 10px; }
+  .howto summary { cursor: pointer; color: var(--blue-dark); }
+  .howto ul { margin: 6px 0 0; padding-left: 20px; color: var(--muted); }
+  #cTable th.org { min-width: 150px; }
+  /* Keep the gene name in view while scrolling across the organism columns. */
+  #cTable th { z-index: 2; }
+  #cTable th:first-child { left: 0; z-index: 3; }
+  #cTable tr:not(.ctxrow) > td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); border-right: 1px solid var(--border); }
+  #cTable tr:not(.ctxrow):hover > td:first-child { background: #f0f7fc; }
+  #cTable th .orginfo { display: block; font-weight: normal; font-size: 11px; color: var(--muted); }
+  td.c-lit { background: var(--blue-tint); font-weight: bold; }
+  td.c-lit .noseq { font-weight: normal; }
+  td.c-orth { border-left: 3px dashed var(--blue); }
+  td.c-abs { color: var(--muted); background: #f3f3f3; }
+  td.c-unk { color: var(--muted); font-style: italic; }
+  td.c-unk span { border-bottom: 1px dotted var(--muted); cursor: help; }
+  .cbadge { font-size: 10px; }
 </style>
 </head>
 <body>
-<header>
+<header class="top">
   <h1>Gene Literature Miner</h1>
-  <div class="sub">Mine the literature for genes on a topic, then pull their nucleotide + protein sequences, functional annotation, and homologues.</div>
+  <nav aria-label="Links">
+    <a href="/docs" target="_blank" rel="noopener">API docs</a>
+    <a href="https://github.com/LeonidasSp/gene-literature-miner" target="_blank" rel="noopener">GitHub</a>
+  </nav>
 </header>
 <main>
-  <div class="card">
-    <div class="row">
-      <div class="grow">
-        <label>Topic / query</label>
-        <input id="query" type="text" placeholder="e.g. biofilm formation" class="grow" style="width:100%" />
+  <p class="intro">Mine the literature for genes on a topic, then pull their nucleotide + protein sequences, functional annotation, and homologues — or compare what is known across several organisms.</p>
+
+  <div class="tabs" role="tablist" aria-label="What do you want to do?">
+    <button type="button" class="tab" role="tab" id="tab-search" data-tab="search" aria-selected="true" aria-controls="view-search">Literature search</button>
+    <button type="button" class="tab" role="tab" id="tab-compare" data-tab="compare" aria-selected="false" aria-controls="view-compare" tabindex="-1">Compare organisms</button>
+  </div>
+
+  <div id="view-search" role="tabpanel" aria-labelledby="tab-search">
+  <div class="panels">
+    <section class="panel p-search" aria-labelledby="search-h">
+      <div class="panel-head" id="search-h">Search literature</div>
+      <div class="panel-body">
+        <div class="field">
+          <label for="query">Topic / query
+            <button type="button" class="help" data-tip="A free-text literature search, e.g. 'biofilm formation'. The most relevant articles are scanned for gene mentions.">?</button></label>
+          <input id="query" type="text" placeholder="e.g. biofilm formation" />
+        </div>
+        <div class="field">
+          <label for="organism">Organism (optional filter)
+            <button type="button" class="help" data-tip="Keeps only genes whose NCBI Gene record matches. Abbreviations (E. coli), common names and genus names (Brugia) work. If the exact species has no gene records, same-genus genes are shown and a note says so.">?</button></label>
+          <input id="organism" type="text" placeholder="e.g. Staphylococcus aureus" />
+        </div>
+        <div class="actions">
+          <span class="hint">Results stream in as each gene resolves.</span>
+          <button id="go" class="btn-primary">Search</button>
+        </div>
       </div>
-      <div class="grow">
-        <label>Organism (optional filter)</label>
-        <input id="organism" type="text" placeholder="e.g. Staphylococcus aureus" style="width:100%" />
+    </section>
+
+    <details class="panel p-options" open>
+      <summary class="panel-head">Advanced options</summary>
+      <div class="panel-body">
+        <div class="field">
+          <label for="source">Literature source
+            <button type="button" class="help tip-left" data-tip="PubMed, Europe PMC (adds preprints and full text), or both. With 'Both', up to twice the paper limit is scanned.">?</button></label>
+          <select id="source">
+            <option value="pubmed">PubMed</option>
+            <option value="europepmc">Europe PMC</option>
+            <option value="both">Both</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="maxPapers">Max papers
+            <button type="button" class="help tip-left" data-tip="How many of the most relevant articles to scan. More papers surface more genes but take longer.">?</button></label>
+          <input id="maxPapers" type="number" value="50" min="1" max="200" />
+        </div>
+        <div class="field">
+          <label for="minMentions">Min mentions
+            <button type="button" class="help tip-left" data-tip="A mention is one time a paper names the gene. Genes named fewer than this many times across all scanned papers are hidden.">?</button></label>
+          <input id="minMentions" type="number" value="1" min="1" />
+        </div>
+        <label class="checkrow" for="fullText">
+          <input type="checkbox" id="fullText" checked />
+          <span>Mine full text of open-access papers (more genes; a little slower)
+            <button type="button" class="help tip-left" data-tip="For open-access papers the whole article is scanned, not just the abstract. Paywalled papers are still covered at the abstract level.">?</button></span>
+        </label>
       </div>
-      <div>
-        <label>Literature source</label>
-        <select id="source">
-          <option value="pubmed">PubMed</option>
-          <option value="europepmc">Europe PMC</option>
-          <option value="both">Both</option>
-        </select>
-      </div>
-      <div>
-        <label>Max papers</label>
-        <input id="maxPapers" type="number" value="50" min="1" max="200" style="width:90px" />
-      </div>
-      <div>
-        <label>Min mentions</label>
-        <input id="minMentions" type="number" value="1" min="1" style="width:90px" />
-      </div>
-      <button id="go">Search</button>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <label style="display:flex; align-items:center; gap:7px; margin:0; cursor:pointer; font-size:13px; color:var(--text)">
-        <input type="checkbox" id="fullText" checked style="width:16px; height:16px" />
-        Mine full text of open-access papers (more genes; a little slower)
-      </label>
-    </div>
-    <div class="hint">Tip: an organism filter (e.g. <code>Staphylococcus aureus</code> or <code>S. aureus</code>) keeps only genes whose NCBI Gene record matches — abbreviations, common names, and genus-only names (<code>Brugia</code>) all work. Results stream in as each gene resolves.</div>
+    </details>
   </div>
 
   <div id="status" class="status"></div>
   <div id="bar" class="bar"><span id="barFill"></span></div>
 
-  <div id="results" class="card" style="display:none">
-    <div id="meta" class="meta"></div>
-    <div class="toolbar">
-      <button class="ghost" id="exportFasta">Download nucleotide FASTA</button>
-      <button class="ghost" id="exportProtFasta">Download protein FASTA</button>
-      <button class="ghost" id="exportCsv">Download CSV</button>
-      <button class="ghost" id="exportBundle">Download all (zip)</button>
-      <span class="ctl">Orthologues via <b>OrthoDB</b></span>
+  <section id="results" class="panel" style="display:none">
+    <div class="panel-head split">
+      <span>Results</span>
+      <div class="head-actions">
+        <button id="exportFasta">Download nucleotide FASTA</button>
+        <button id="exportProtFasta">Download protein FASTA</button>
+        <button id="exportCsv">Download CSV</button>
+        <button id="exportBundle">Download all (zip)</button>
+      </div>
     </div>
-    <div style="overflow:auto; max-height:70vh">
-      <table id="table">
-        <thead>
-          <tr>
-            <th data-k="symbol">Gene</th>
-            <th data-k="description">Description</th>
-            <th data-k="organism">Organism</th>
-            <th data-k="mention_count"># Mentions</th>
-            <th data-k="paper_count"># Papers</th>
-            <th>Papers (PMID)</th>
-            <th>Nucleotide sequence</th>
-            <th>Protein (UniProt)</th>
-            <th>Function</th>
-            <th>Orthologues</th>
-          </tr>
-        </thead>
-        <tbody id="tbody"></tbody>
-      </table>
+    <div class="panel-body">
+      <div id="meta" class="meta"></div>
+      <div class="ctl">Orthologues via <b>OrthoDB</b></div>
+      <div style="overflow:auto; max-height:70vh">
+        <table id="table">
+          <thead>
+            <tr>
+              <th data-k="symbol">Gene</th>
+              <th data-k="description">Description</th>
+              <th data-k="organism">Organism</th>
+              <th data-k="mention_count" title="Total times the gene was named across all scanned papers"># Mentions</th>
+              <th data-k="paper_count" title="Number of different papers that name the gene"># Papers</th>
+              <th>Papers (PMID)</th>
+              <th>Nucleotide sequence</th>
+              <th>Protein (UniProt)</th>
+              <th>Function</th>
+              <th>Orthologues</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
     </div>
+  </section>
+  </div><!-- /view-search -->
+
+  <div id="view-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+    <div class="panels">
+      <section class="panel p-search" aria-labelledby="cmp-h">
+        <div class="panel-head" id="cmp-h">Compare organisms</div>
+        <div class="panel-body">
+          <div class="field">
+            <label for="cQuery">Topic / query
+              <button type="button" class="help" data-tip="The same literature search is run for every organism, e.g. 'biofilm formation'.">?</button></label>
+            <input id="cQuery" type="text" placeholder="e.g. biofilm formation" />
+          </div>
+          <div class="field">
+            <label for="cOrganisms">Organisms (2 to 5)
+              <button type="button" class="help" data-tip="One per line (commas work too). Abbreviations like S. aureus are fine. All organisms should be from the same domain of life, e.g. all bacteria. Enter a species, not a genus.">?</button></label>
+            <textarea id="cOrganisms" rows="4" placeholder="One per line, e.g.&#10;Staphylococcus aureus&#10;Staphylococcus epidermidis&#10;S. haemolyticus"></textarea>
+          </div>
+          <div class="actions">
+            <span class="hint">Takes about a minute: every organism's papers are read, then OrthoDB is asked about the others.</span>
+            <button id="cGo" class="btn-primary">Compare</button>
+          </div>
+        </div>
+      </section>
+
+      <details class="panel p-options" open>
+        <summary class="panel-head">Advanced options</summary>
+        <div class="panel-body">
+          <div class="field">
+            <label for="cSource">Literature source
+              <button type="button" class="help tip-left" data-tip="PubMed, Europe PMC (adds preprints and full text), or both.">?</button></label>
+            <select id="cSource">
+              <option value="pubmed">PubMed</option>
+              <option value="europepmc">Europe PMC</option>
+              <option value="both">Both</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cMaxPapers">Max papers per organism
+              <button type="button" class="help tip-left" data-tip="How many of the most relevant articles are scanned for each organism (up to 100).">?</button></label>
+            <input id="cMaxPapers" type="number" value="30" min="1" max="100" />
+          </div>
+          <div class="field">
+            <label for="cGenes">Genes compared per organism
+              <button type="button" class="help tip-left" data-tip="Only each organism's most-mentioned genes are compared (up to 30), because every one needs its own OrthoDB lookups. More genes take longer.">?</button></label>
+            <input id="cGenes" type="number" value="15" min="1" max="30" />
+          </div>
+          <div class="field">
+            <label for="cMinMentions">Min mentions
+              <button type="button" class="help tip-left" data-tip="Genes named fewer than this many times in an organism's papers are ignored.">?</button></label>
+            <input id="cMinMentions" type="number" value="1" min="1" />
+          </div>
+          <label class="checkrow" for="cFullText">
+            <input type="checkbox" id="cFullText" checked />
+            <span>Mine full text of open-access papers (more genes; a little slower)</span>
+          </label>
+        </div>
+      </details>
+    </div>
+
+    <div id="cStatus" class="status"></div>
+    <div id="cBar" class="bar"><span id="cBarFill"></span></div>
+
+    <section id="cResults" class="panel" style="display:none">
+      <div class="panel-head split">
+        <span>Comparison</span>
+        <div class="head-actions"><button id="cCsv">Download CSV</button></div>
+      </div>
+      <div class="panel-body">
+        <div id="cNotices"></div>
+        <div id="cSummary" class="meta"></div>
+        <div id="cOrgLines" class="cmp-orgs"></div>
+        <div class="filters">
+          <label for="cFilter">Show</label>
+          <select id="cFilter"></select>
+          <label for="cSearch">Find</label>
+          <input id="cSearch" type="text" placeholder="gene or description" />
+          <span class="hint" id="cShown"></span>
+        </div>
+        <details class="howto">
+          <summary>How to read this table</summary>
+          <ul>
+            <li><b>N mentions</b> &mdash; the papers scanned for that organism name the gene (the link opens its NCBI Gene page).</li>
+            <li><b>ortholog present</b> &mdash; those papers do not name it, but OrthoDB lists a member of the same ortholog group in that organism.</li>
+            <li><b>none in OrthoDB</b> &mdash; OrthoDB lists no member of the group in that organism.</li>
+            <li><b>not checked</b> &mdash; no OrthoDB group could be found for the gene (hover for the reason). This does <em>not</em> mean the gene is missing.</li>
+            <li>Each row is an OrthoDB ortholog group, so it can include closely related paralogs. &ldquo;Not discussed&rdquo; only means the scanned papers do not name the gene.</li>
+          </ul>
+        </details>
+        <div class="scroll" style="overflow:auto; max-height:70vh">
+          <table id="cTable">
+            <thead id="cHead"></thead>
+            <tbody id="cBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
   </div>
 </main>
 
@@ -260,7 +510,7 @@ function updateMeta() {
     `<span><b>${withProt}</b> protein</span>` +
     `<span>source: <code>${escapeHtml(DATA.source || "pubmed")}</code></span>` +
     `<span>term: <code>${escapeHtml(DATA.pubmed_term || "")}</code></span>` +
-    (DATA.note ? `<span>Note: ${escapeHtml(DATA.note)}</span>` : "");
+    (DATA.note ? `<span class="note">Note: ${escapeHtml(DATA.note)}</span>` : "");
 }
 
 function renderRows() {
@@ -283,7 +533,10 @@ function renderRows() {
       `<div>${aliases}</div></td>` +
       `<td>${escapeHtml(g.description || "")}</td>` +
       `<td><i>${escapeHtml(g.organism || "")}</i></td>` +
-      `<td>${g.mention_count}</td>` +
+      `<td>${g.mention_count}` +
+        ((g.snippets || []).length
+          ? `<div><button class="ctxbtn" onclick="toggleContext('${g.gene_id}')">context</button></div>` : "") +
+      `</td>` +
       `<td>${g.paper_count}</td>` +
       `<td>${pmids}</td>` +
       `<td id="seq_${g.gene_id}">${seqCell(g)}</td>` +
@@ -389,6 +642,52 @@ function toggleBox(id) {
   el.style.display = el.style.display === "block" ? "none" : "block";
 }
 
+// Wrap each highlighted range in <mark>, escaping everything else. Ranges are
+// [start, end) offsets into `text`; overlapping or out-of-range ones are skipped.
+function markedText(text, marks) {
+  let out = "", pos = 0;
+  [...(marks || [])].sort((a, b) => a[0] - b[0]).forEach(([s, e]) => {
+    if (s < pos || e > text.length || e <= s) return;
+    out += escapeHtml(text.slice(pos, s)) + "<mark>" + escapeHtml(text.slice(s, e)) + "</mark>";
+    pos = e;
+  });
+  return out + escapeHtml(text.slice(pos));
+}
+
+function snippetHtml(s) {
+  const paper = `<a href="https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(s.pmid)}/" target="_blank" rel="noopener">PMID ${escapeHtml(s.pmid)}</a>`;
+  return `<div class="snip"><div class="snip-src"><span class="sec">${escapeHtml(s.section)}</span> · ${paper}` +
+    (s.title ? ` · <i>${escapeHtml(s.title)}</i>` : "") + `</div>` +
+    `<div class="snip-text">${markedText(s.text, s.marks)}</div></div>`;
+}
+
+// Show / hide the example sentences for a gene as a full-width row under it.
+function toggleContext(geneId) {
+  const open = $("ctx_" + geneId);
+  if (open) { open.remove(); return; }
+  const row = $("r_" + geneId);
+  const g = (DATA.genes || []).find((x) => x.gene_id === geneId);
+  if (!row || !g || !(g.snippets || []).length) return;
+  const tr = document.createElement("tr");
+  tr.id = "ctx_" + geneId;
+  tr.className = "ctxrow";
+  tr.innerHTML = `<td colspan="10"><div class="ctxbox">` +
+    `<div class="ctxhead">${escapeHtml(g.symbol)} is named ${g.mention_count} time(s) in ${g.paper_count} paper(s); ` +
+    `showing ${g.snippets.length} example sentence(s), the gene highlighted.</div>` +
+    g.snippets.map(snippetHtml).join("") + `</div></td>`;
+  row.after(tr);
+  fitContextBoxes();
+}
+
+// The table can be wider than the area it scrolls in. Keep each context box as
+// wide as the visible area (pinned to the left) so it reads without side-scrolling.
+function fitContextBoxes() {
+  document.querySelectorAll(".ctxbox").forEach((b) => {
+    b.style.width = b.closest("table").parentElement.clientWidth + "px";
+  });
+}
+window.addEventListener("resize", fitContextBoxes);
+
 const HOMO_CACHE = {};
 async function fetchHomologs(geneId) {
   const g = (DATA.genes || []).find((x) => x.gene_id === geneId);
@@ -398,13 +697,16 @@ async function fetchHomologs(geneId) {
   if (box.style.display === "block") { box.style.display = "none"; return; }
   box.style.display = "block";
   const name = (g.protein && g.protein.name) || g.description || g.symbol || "";
-  const cacheKey = `${name}|${g.organism}`;
+  // With the UniProt accession the server finds the protein's exact ortholog group;
+  // by name alone it can only guess among several candidates.
+  const accession = (g.protein && g.protein.accession) || "";
+  const cacheKey = `${name}|${g.organism}|${accession}`;
   if (HOMO_CACHE[cacheKey]) { box.innerHTML = HOMO_CACHE[cacheKey]; return; }
   box.innerHTML = `<span class="spin">Looking up OrthoDB ortholog group…</span>`;
   btn.disabled = true;
   try {
     const params = new URLSearchParams({
-      limit: "25", name, organism: g.organism || "",
+      limit: "25", name, organism: g.organism || "", accession, taxid: g.taxid || "",
     });
     const resp = await fetch("/api/homologs?" + params.toString());
     const data = await resp.json();
@@ -525,6 +827,292 @@ document.querySelectorAll("th[data-k]").forEach((th) => {
     renderRows();
   });
 });
+
+/* ============================================================ Mode tabs */
+function selectTab(name) {
+  ["search", "compare"].forEach((n) => {
+    const on = n === name;
+    $("tab-" + n).setAttribute("aria-selected", on ? "true" : "false");
+    $("tab-" + n).tabIndex = on ? 0 : -1;
+    $("view-" + n).hidden = !on;
+  });
+  history.replaceState(null, "", name === "compare" ? "#compare" : location.pathname + location.search);
+  fitContextBoxes();  // boxes in a hidden view have no width until it is shown
+}
+document.querySelectorAll(".tab").forEach((t) => {
+  t.addEventListener("click", () => selectTab(t.dataset.tab));
+  t.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const other = t.dataset.tab === "search" ? "compare" : "search";
+    selectTab(other);
+    $("tab-" + other).focus();
+  });
+});
+if (location.hash === "#compare") selectTab("compare");
+
+/* ====================================================== Compare organisms */
+let CMP = null;  // the comparison matrix sent by the server
+let CES = null;  // the active EventSource
+
+const OG_WHY = {
+  no_protein: "no UniProt protein could be matched to this gene",
+  no_group: "OrthoDB has no ortholog group for this protein",
+  unavailable: "OrthoDB did not answer for this gene",
+};
+
+function cStatus(msg) { $("cStatus").textContent = msg; }
+function cBar(pct) { $("cBar").style.display = "block"; $("cBarFill").style.width = pct + "%"; }
+function cFinish() {
+  if (CES) { CES.close(); CES = null; }
+  $("cGo").disabled = false;
+  setTimeout(() => { $("cBar").style.display = "none"; }, 600);
+}
+
+// One organism per line (commas and semicolons work too); blanks and repeats dropped.
+function parseOrganismList(text) {
+  const seen = new Set(), out = [];
+  (text || "").split(/[\n\r,;]+/).forEach((part) => {
+    const name = part.replace(/\s+/g, " ").trim();
+    if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); out.push(name); }
+  });
+  return out;
+}
+
+function runCompare() {
+  const query = $("cQuery").value.trim();
+  if (!query) { cStatus("Enter a topic to search."); return; }
+  const orgs = parseOrganismList($("cOrganisms").value);
+  if (orgs.length < 2) { cStatus("Enter at least two organisms, one per line."); return; }
+  if (orgs.length > 5) { cStatus("Compare at most 5 organisms at a time."); return; }
+  if (CES) { CES.close(); CES = null; }
+  $("cGo").disabled = true;
+  $("cResults").style.display = "none";
+  CMP = null;
+  cStatus("Identifying the organisms…");
+  cBar(2);
+
+  const params = new URLSearchParams({
+    query,
+    max_papers: parseInt($("cMaxPapers").value) || 30,
+    genes_per_organism: parseInt($("cGenes").value) || 15,
+    min_mentions: parseInt($("cMinMentions").value) || 1,
+    source: $("cSource").value,
+    full_text: $("cFullText").checked,
+  });
+  orgs.forEach((o) => params.append("organism", o));
+  const es = new EventSource("/api/compare/stream?" + params.toString());
+  CES = es;
+
+  let scanned = 0;
+  es.addEventListener("meta", () => {
+    cStatus(`Reading the literature for ${orgs.length} organisms…`);
+    cBar(5);
+  });
+  es.addEventListener("organism", (e) => {
+    const d = JSON.parse(e.data);
+    scanned++;
+    cStatus(`Read the papers for ${d.label} (${scanned} of ${orgs.length})…`);
+    cBar(5 + (30 * scanned) / orgs.length);
+  });
+  es.addEventListener("stage", (e) => {
+    const d = JSON.parse(e.data);
+    const frac = d.total ? d.done / d.total : 1;
+    if (d.stage === "link") {
+      cStatus(`Placing genes in OrthoDB ortholog groups… ${d.done} / ${d.total}`);
+      cBar(35 + 40 * frac);
+    } else {
+      cStatus(`Checking which organisms have each group… ${d.done} / ${d.total}`);
+      cBar(75 + 23 * frac);
+    }
+  });
+  es.addEventListener("matrix", (e) => {
+    CMP = JSON.parse(e.data);
+    renderCompare();
+  });
+  es.addEventListener("done", () => {
+    cFinish();
+    cStatus(CMP && CMP.groups.length ? "" : "No genes were found for these organisms and this topic.");
+  });
+  es.addEventListener("error", (e) => {
+    // A server-sent error carries a message; a dropped connection does not.
+    let msg = "Error: the comparison failed or the connection was lost.";
+    if (typeof e.data === "string") { try { msg = "Error: " + JSON.parse(e.data).detail; } catch (_) { /* keep default */ } }
+    cFinish();
+    if (!CMP) cStatus(msg);
+  });
+}
+
+function renderCompare() {
+  const m = CMP, s = m.summary;
+  $("cResults").style.display = "block";
+  const notes = (m.notices || []).slice();
+  m.organisms.forEach((o) => {
+    if (o.note) notes.push(`${o.label}: ${o.note}`);
+    if (o.error) notes.push(`${o.label}: ${o.error}`);
+    if (o.sparse) notes.push(`${o.label}: only ${o.genes_found} gene${o.genes_found === 1 ? " was" : "s were"} recognised in ${o.papers} papers ` +
+      `(gene mentions for some species are linked to NCBI records poorly), so “not named in the papers” says little about it. ` +
+      `Its OrthoDB results are the more reliable ones.`);
+    if (m.level && !o.orthology_checked) notes.push(`${o.label}: could not be matched to a species, so OrthoDB was not asked about it.`);
+  });
+  $("cNotices").innerHTML = notes.map((n) => `<span class="note">Note: ${escapeHtml(n)}</span>`).join("");
+  $("cSummary").innerHTML =
+    `<span><b>${s.groups}</b> gene groups</span>` +
+    `<span><b>${s.present_in_all}</b> present in all organisms</span>` +
+    `<span><b>${s.missing_somewhere}</b> absent from at least one</span>` +
+    `<span><b>${s.unchecked}</b> not fully checked</span>` +
+    `<span><b>${s.discussed_in_all}</b> named in every organism's papers</span>` +
+    (m.level ? `<span>orthology: OrthoDB, ${escapeHtml(m.level)}</span>` : "");
+  $("cOrgLines").innerHTML = m.organisms.map((o) =>
+    `<div><i>${escapeHtml(o.label)}</i>: ${o.papers} papers scanned, ${o.genes_found} genes found` +
+    (o.genes_found > o.genes_compared ? `, the ${o.genes_compared} most-mentioned compared` : "") + `</div>`).join("");
+  fillCompareFilter();
+  renderCompareHead();
+  renderCompareRows();
+}
+
+function fillCompareFilter() {
+  const sel = $("cFilter"), keep = sel.value;
+  const opts = [
+    ["all", "All gene groups"],
+    ["all_present", "Present in all organisms"],
+    ["some_absent", "Absent from at least one organism"],
+    ["lit_all", "Named in every organism's papers"],
+    ["unchecked", "Not fully checked"],
+  ];
+  CMP.organisms.forEach((o) => opts.push(["only:" + o.label, "Named only in " + o.label + "'s papers"]));
+  sel.innerHTML = opts.map(([v, t]) => `<option value="${escapeHtml(v)}">${escapeHtml(t)}</option>`).join("");
+  sel.value = opts.some(([v]) => v === keep) ? keep : "all";
+}
+
+function passesFilter(g, f) {
+  if (f === "all_present") return g.conservation === "all";
+  if (f === "some_absent") return g.conservation === "some_absent";
+  if (f === "unchecked") return g.conservation === "unchecked";
+  if (f === "lit_all") return g.n_literature === CMP.organisms.length;
+  if (f.startsWith("only:")) {
+    const m = g.members[f.slice(5)];
+    return g.n_literature === 1 && !!m && m.state === "literature";
+  }
+  return true;
+}
+
+function renderCompareHead() {
+  $("cHead").innerHTML = "<tr><th>Gene group</th><th>Description</th>" +
+    CMP.organisms.map((o) =>
+      `<th class="org"><i>${escapeHtml(o.label)}</i><span class="orginfo">${o.papers} papers · ${o.genes_found} genes</span></th>`).join("") +
+    "<th>Present in</th></tr>";
+}
+
+function unknownReason(g) {
+  if (!g.og) return "Not checked: " + (OG_WHY[g.og_status] || "the gene could not be placed in an ortholog group");
+  return "Not checked: OrthoDB did not answer for this organism, or the organism could not be identified";
+}
+
+function safeUrl(u) { return /^https:\/\//.test(u || "") ? u : ""; }
+
+function compareCell(g, org) {
+  const c = g.members[org.label];
+  if (c.state === "literature") {
+    const url = safeUrl(c.gene_url);
+    const n = `${c.mentions} mention${c.mentions === 1 ? "" : "s"}`;
+    const link = url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${n}</a>` : n;
+    const records = (c.gene_ids || []).length > 1 ? ` · ${c.gene_ids.length} gene records` : "";
+    const other = (c.species || []).filter((x) => x && x !== org.label);
+    return `<td class="c-lit">${link}<div class="noseq">${c.papers} paper${c.papers === 1 ? "" : "s"}${records}</div>` +
+      (other.length ? `<div class="noseq">as ${escapeHtml(other.join(", "))}</div>` : "") + `</td>`;
+  }
+  if (c.state === "ortholog") {
+    const ex = c.example ? `${c.example.gene_id} ${c.example.description}`.trim() : "";
+    return `<td class="c-orth" title="${escapeHtml(ex)}">ortholog present` +
+      `<div class="noseq">${c.count} gene${c.count === 1 ? "" : "s"} in OrthoDB; not named in these papers</div></td>`;
+  }
+  if (c.state === "absent") return `<td class="c-abs">none in OrthoDB</td>`;
+  return `<td class="c-unk"><span title="${escapeHtml(unknownReason(g))}">not checked</span></td>`;
+}
+
+function renderCompareRows() {
+  const f = $("cFilter").value, q = $("cSearch").value.trim().toLowerCase();
+  const orgs = CMP.organisms, cols = orgs.length + 3;
+  const rows = CMP.groups.filter((g) =>
+    passesFilter(g, f) && (!q || `${g.symbol} ${g.description} ${g.og ? g.og.name : ""}`.toLowerCase().includes(q)));
+  $("cShown").textContent = `Showing ${rows.length} of ${CMP.groups.length} gene groups`;
+  $("cBody").innerHTML = rows.map((g) => {
+    const og = g.og
+      ? `<div class="noseq"><a href="https://www.orthodb.org/?query=${encodeURIComponent(g.og.id)}" target="_blank" rel="noopener">${escapeHtml(g.og.name || g.og.id)}</a></div>`
+      : `<div class="noseq">no OrthoDB group</div>`;
+    const hasCtx = orgs.some((o) => (g.members[o.label].snippets || []).length);
+    const ctx = hasCtx ? `<div><button class="ctxbtn cctxbtn" data-gid="${escapeHtml(g.id)}">context</button></div>` : "";
+    return `<tr id="c_${escapeHtml(g.id)}"><td><span class="sym">${escapeHtml(g.symbol)}</span>${og}${ctx}</td>` +
+      `<td>${escapeHtml(g.description)}</td>` + orgs.map((o) => compareCell(g, o)).join("") +
+      `<td>${g.n_present} of ${orgs.length}</td></tr>`;
+  }).join("") || `<tr><td colspan="${cols}" class="noseq">No gene groups match this filter.</td></tr>`;
+  fitContextBoxes();
+}
+
+// Example sentences for one row, grouped by the organism whose papers they come from.
+function toggleCompareContext(gid) {
+  const open = $("cctx_" + gid);
+  if (open) { open.remove(); return; }
+  const row = $("c_" + gid), g = (CMP.groups || []).find((x) => x.id === gid);
+  if (!row || !g) return;
+  const blocks = CMP.organisms.map((o) => {
+    const c = g.members[o.label];
+    if (c.state !== "literature" || !(c.snippets || []).length) return "";
+    return `<div class="ctxhead"><b><i>${escapeHtml(o.label)}</i></b> &mdash; ${escapeHtml(c.symbol || g.symbol)}: ` +
+      `${c.mentions} mention(s) in ${c.papers} paper(s)</div>` + c.snippets.map(snippetHtml).join("");
+  }).join("");
+  const tr = document.createElement("tr");
+  tr.id = "cctx_" + gid;
+  tr.className = "ctxrow";
+  tr.innerHTML = `<td colspan="${CMP.organisms.length + 3}"><div class="ctxbox">${blocks}</div></td>`;
+  row.after(tr);
+  fitContextBoxes();
+}
+
+// A spreadsheet treats cells starting with = + - @ as formulas; prefix text cells that do.
+function csvCell(v, isText) {
+  let s = String(v == null ? "" : v);
+  if (isText && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+function compareCsv() {
+  const orgs = CMP.organisms;
+  const head = ["gene_group", "description", "orthodb_group_id", "orthodb_group_name", "present_in", "organisms_compared"];
+  orgs.forEach((o) => head.push(`${o.label}: status`, `${o.label}: gene_id`, `${o.label}: mentions`,
+                                `${o.label}: papers`, `${o.label}: orthodb_members`));
+  const rows = [head.map((h) => csvCell(h, true))];
+  CMP.groups.forEach((g) => {
+    const r = [csvCell(g.symbol, true), csvCell(g.description, true), csvCell(g.og ? g.og.id : ""),
+               csvCell(g.og ? g.og.name : "", true), csvCell(g.n_present), csvCell(orgs.length)];
+    orgs.forEach((o) => {
+      const c = g.members[o.label];
+      r.push(csvCell(c.state), csvCell(c.gene_id || ""), csvCell(c.mentions == null ? "" : c.mentions),
+             csvCell(c.papers == null ? "" : c.papers), csvCell(c.state === "ortholog" ? c.count : ""));
+    });
+    rows.push(r);
+  });
+  return rows.map((r) => r.join(",")).join("\r\n") + "\r\n";
+}
+
+function exportCompareCsv() {
+  if (!CMP || !CMP.groups.length) { cStatus("Nothing to export yet."); return; }
+  download("organism_comparison.csv", compareCsv(), "text/csv");
+}
+
+$("cGo").addEventListener("click", runCompare);
+$("cCsv").addEventListener("click", exportCompareCsv);
+$("cFilter").addEventListener("change", () => { if (CMP) renderCompareRows(); });
+$("cSearch").addEventListener("input", () => { if (CMP) renderCompareRows(); });
+$("cBody").addEventListener("click", (e) => {
+  const b = e.target.closest(".cctxbtn");
+  if (b) toggleCompareContext(b.dataset.gid);
+});
+$("cQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") runCompare(); });
+
+// The "?" help buttons show their tooltip on hover/focus; give each the same
+// text as an accessible name so screen readers announce it too.
+document.querySelectorAll(".help").forEach((h) => h.setAttribute("aria-label", h.dataset.tip));
 
 $("go").addEventListener("click", runSearch);
 $("exportFasta").addEventListener("click", exportFasta);
