@@ -104,6 +104,40 @@ are skipped). Export buttons:
 - **CSV** (gene + sequence + protein summary)
 - **Download all (zip)** — both FASTA files, the CSV, and an `annotations.csv`
 
+## Compare organisms
+
+The **Compare organisms** tab runs one topic across 2–5 organisms and lays the genes
+out as a matrix (e.g. *which biofilm genes are conserved across staphylococci?*).
+Two different questions are kept apart on purpose, because mixing them is what makes
+naive comparisons misleading:
+
+- **Literature** — is the gene *named in the papers scanned for that organism*?
+- **Orthology** — does the organism have a member of the gene's **OrthoDB ortholog
+  group** at all, whether or not those papers happen to name it?
+
+Every cell is therefore one of: **N mentions** (named in that organism's papers),
+**ortholog present** (not named, but OrthoDB lists a member there), **none in OrthoDB**,
+or **not checked**. "Not checked" means no OrthoDB group could be found for the gene
+(hover for the reason); it is never shown as "absent".
+
+How genes are matched: each gene is placed in its *exact* OrthoDB group through its
+UniProt accession. Genes are never matched by name alone — in testing, gene names
+were unreliable across organisms (locus tags, protein abbreviations such as "SOD").
+Roughly two thirds of genes could be placed in a group; the rest stay unlinked.
+
+Things to keep in mind:
+
+- Only each organism's most-mentioned genes are compared (15 by default, up to 30).
+- PubTator links gene mentions to NCBI records unevenly across species; an organism
+  that yields very few genes from many papers is flagged, because "not named in the
+  papers" then says little about it. Its OrthoDB results are the more reliable ones.
+- Rows are ortholog groups, which can include closely related paralogs.
+- All organisms must be from the same domain of life (e.g. all bacteria). A comparison
+  takes about a minute; it is rate-limited like a search.
+
+**Find orthologues** in the search results uses the same exact-group lookup when the
+gene has a UniProt match, and falls back to a name search otherwise.
+
 ## Notes & limits
 
 - **Nucleotide sequences** come from NCBI first (exact gene region on the correct

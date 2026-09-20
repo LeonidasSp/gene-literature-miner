@@ -53,6 +53,7 @@ class NCBIClient:
         self._limiter = RateLimiter(_MIN_INTERVAL)
         self._tax_cache: dict[str, str] = {}
         self._org_cache: dict[str, Any] = {}
+        self._species_cache: dict[str, Optional[dict[str, str]]] = {}
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -177,6 +178,27 @@ class NCBIClient:
             lin = f"{lin}; {n.group(1).strip()}"
         self._tax_cache[taxid] = lin
         return lin
+
+    async def species_of(self, taxid: str) -> Optional[dict[str, str]]:
+        """The species a taxid belongs to, as {"taxid", "name"} -- the taxid itself
+        if it is already a species, its species ancestor for a strain / subspecies /
+        serovar, or None for a genus or anything broader. Cached; None on error."""
+        taxid = str(taxid or "").strip()
+        if not taxid:
+            return None
+        if taxid in self._species_cache:
+            return self._species_cache[taxid]
+        result: Optional[dict[str, str]] = None
+        try:
+            resp = await self._get(
+                f"{EUTILS}/efetch.fcgi",
+                {**self._common(), "db": "taxonomy", "id": taxid, "retmode": "xml"},
+            )
+            result = species_from_taxonomy_xml(resp.text)
+        except RuntimeError:
+            return None  # transient failure: don't cache it
+        self._species_cache[taxid] = result
+        return result
 
     async def resolve_organism(self, text: str) -> Optional[dict[str, str]]:
         """
@@ -413,6 +435,29 @@ def _iter_bioc_docs(text: str):
             yield json.loads(line)
         except json.JSONDecodeError:
             continue
+
+
+_TAXON_RE = re.compile(
+    r"<Taxon>\s*<TaxId>(\d+)</TaxId>\s*<ScientificName>(.*?)</ScientificName>"
+    r"(?:.*?)<Rank>(.*?)</Rank>", re.S)
+_LINEAGE_TAXON_RE = re.compile(
+    r"<Taxon>\s*<TaxId>(\d+)</TaxId>\s*<ScientificName>(.*?)</ScientificName>"
+    r"\s*<Rank>(.*?)</Rank>\s*</Taxon>", re.S)
+
+
+def species_from_taxonomy_xml(xml: str) -> Optional[dict[str, str]]:
+    """Species {"taxid", "name"} for an NCBI Taxonomy efetch record: the record
+    itself if its rank is species, else its species ancestor, else None."""
+    own = _TAXON_RE.search(xml or "")
+    if not own:
+        return None
+    if own.group(3).strip() == "species":
+        return {"taxid": own.group(1), "name": own.group(2).strip()}
+    lineage = re.search(r"<LineageEx>(.*?)</LineageEx>", xml, re.S)
+    for tid, name, rank in _LINEAGE_TAXON_RE.findall(lineage.group(1) if lineage else ""):
+        if rank.strip() == "species":
+            return {"taxid": tid, "name": name.strip()}
+    return None
 
 
 def absorb_document(genes: dict[str, dict[str, Any]], doc: dict[str, Any]) -> None:
