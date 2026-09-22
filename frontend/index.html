@@ -4,6 +4,14 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Gene Literature Miner</title>
+<script>
+  // Applied before the stylesheet paints, so a remembered choice doesn't flash
+  // the other theme first. No remembered choice -> the @media query below decides.
+  try {
+    var t = localStorage.getItem("glm-theme");
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
 <style>
   /* Colour-blind-safe palette (Okabe & Ito): blue #0072B2, bluish green #009E73,
      orange #E69F00, plus pale tints of them and neutral grays. Colour is never the
@@ -16,7 +24,43 @@
     --bg: #f5f5f5;        --panel: #ffffff;
     --border: #b4c7d6;    --line: #d9e2ea;
     --text: #1a1a1a;      --muted: #505050;       --field: #8c8c8c;
+    --input-bg: #ffffff;
+    --btn-bg: #f2f2f2;     --btn-bg-hover: #e4e4e4;
+    --neutral-bg: #f3f3f3; --neutral-border: #bdbdbd;
+    --tab-hover: #d3e8f6;
+    --tooltip-bg: #262626; --tooltip-text: #ffffff;
+    --bar-track: #e2e8ed;
+    --row-hover: #f0f7fc;
+    --seqbox-bg: #f7f7f7;
+    --ctxrow-bg: #fafcfe;
+    --code-border: #dddddd;
   }
+  /* Dark mode: same Okabe-Ito hues, lightened so they still meet contrast on a
+     dark background; colour is still never the only signal (see above). Applies
+     by system preference, or by explicit choice (the theme toggle sets
+     data-theme and remembers it per browser). */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --blue: #4fb2e8; --blue-dark: #7cc7f0; --blue-tint: #123246;
+      --green: #3ddba8; --green-text: #8beecb; --green-tint: #123529;
+      --orange: #ffb938; --orange-text: #ffd685; --orange-tint: #3a2c0c;
+      --bg: #17191c; --panel: #1f2226; --border: #3a4048; --line: #2c3138;
+      --text: #eaebec; --muted: #a7adb4; --field: #6b7580;
+      --input-bg: #2a2e33; --btn-bg: #2a2e33; --btn-bg-hover: #363b42;
+      --neutral-bg: #2a2e33; --neutral-border: #454c54; --tab-hover: #2b3d4c;
+      --tooltip-bg: #35393f; --tooltip-text: #f2f2f2;
+      --bar-track: #2c3138; --row-hover: #232830; --seqbox-bg: #23262b;
+      --ctxrow-bg: #20242a; --code-border: #454c54; }
+  }
+  :root[data-theme="dark"] { --blue: #4fb2e8; --blue-dark: #7cc7f0; --blue-tint: #123246;
+    --green: #3ddba8; --green-text: #8beecb; --green-tint: #123529;
+    --orange: #ffb938; --orange-text: #ffd685; --orange-tint: #3a2c0c;
+    --bg: #17191c; --panel: #1f2226; --border: #3a4048; --line: #2c3138;
+    --text: #eaebec; --muted: #a7adb4; --field: #6b7580;
+    --input-bg: #2a2e33; --btn-bg: #2a2e33; --btn-bg-hover: #363b42;
+    --neutral-bg: #2a2e33; --neutral-border: #454c54; --tab-hover: #2b3d4c;
+    --tooltip-bg: #35393f; --tooltip-text: #f2f2f2;
+    --bar-track: #2c3138; --row-hover: #232830; --seqbox-bg: #23262b;
+    --ctxrow-bg: #20242a; --code-border: #454c54; }
   * { box-sizing: border-box; }
   body {
     margin: 0; font-family: Arial, Helvetica, sans-serif;
@@ -29,7 +73,8 @@
     gap: 8px 20px; padding: 18px 24px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
   }
   .top h1 { margin: 0; font-size: 26px; font-weight: bold; }
-  .top nav { display: flex; gap: 18px; font-size: 14px; }
+  .top nav { display: flex; align-items: center; gap: 18px; font-size: 14px; }
+  .themebtn { font-size: 15px; line-height: 1; padding: 5px 9px; }
   main { padding: 18px 24px 60px; max-width: 1400px; margin: 0 auto; }
   .intro { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
 
@@ -68,12 +113,12 @@
   label.checkrow { display: flex; align-items: flex-start; gap: 8px; font-weight: normal; margin: 0; cursor: pointer; }
   label.checkrow input { margin-top: 2px; width: 16px; height: 16px; flex: none; }
   input[type=text], input[type=number], select {
-    width: 100%; font: inherit; font-size: 14px; background: #fff; color: var(--text);
+    width: 100%; font: inherit; font-size: 14px; background: var(--input-bg); color: var(--text);
     border: 1px solid var(--field); border-radius: 3px; padding: 7px 9px;
   }
   input[type=number] { max-width: 130px; }
   textarea {
-    width: 100%; font: inherit; font-size: 14px; background: #fff; color: var(--text);
+    width: 100%; font: inherit; font-size: 14px; background: var(--input-bg); color: var(--text);
     border: 1px solid var(--field); border-radius: 3px; padding: 7px 9px; resize: vertical;
   }
   [hidden] { display: none !important; }
@@ -85,13 +130,13 @@
     border: 1px solid var(--border); border-bottom: none; border-radius: 8px 8px 0 0;
     padding: 10px 22px; margin-bottom: -1px; cursor: pointer;
   }
-  .tab:hover { background: #d3e8f6; }
+  .tab:hover { background: var(--tab-hover); }
   .tab[aria-selected="true"] { background: var(--panel); border-top: 3px solid var(--blue); padding-top: 8px; border-bottom: 1px solid var(--panel); }
   button {
-    font: inherit; font-size: 13px; background: #f2f2f2; color: var(--text);
+    font: inherit; font-size: 13px; background: var(--btn-bg); color: var(--text);
     border: 1px solid var(--field); border-radius: 4px; padding: 5px 12px; cursor: pointer;
   }
-  button:hover { background: #e4e4e4; }
+  button:hover { background: var(--btn-bg-hover); }
   button:disabled { opacity: .55; cursor: default; }
   .btn-primary {
     background: var(--blue); color: #fff; border: 1px solid var(--blue-dark);
@@ -111,7 +156,7 @@
   .help:hover, .help:focus { background: transparent; color: var(--blue-dark); border-color: var(--blue-dark); }
   .help::after {
     content: attr(data-tip); display: none; position: absolute; z-index: 10; top: 22px; left: -6px;
-    width: 250px; padding: 8px 10px; background: #262626; color: #fff; border-radius: 4px;
+    width: 250px; padding: 8px 10px; background: var(--tooltip-bg); color: var(--tooltip-text); border-radius: 4px;
     font-size: 12px; font-weight: normal; line-height: 1.35; text-align: left; white-space: normal;
   }
   .help:hover::after, .help:focus::after { display: block; }
@@ -119,7 +164,7 @@
 
   /* Status + progress */
   .status { margin: 14px 0 6px; color: var(--muted); font-size: 13px; min-height: 18px; }
-  .bar { height: 8px; background: #e2e8ed; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin: 0 0 14px; display: none; }
+  .bar { height: 8px; background: var(--bar-track); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; margin: 0 0 14px; display: none; }
   .bar > span { display: block; height: 100%; width: 0; background: var(--blue); transition: width .25s; }
 
   /* Results */
@@ -131,11 +176,11 @@
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { background: var(--blue-tint); font-weight: bold; position: sticky; top: 0; cursor: pointer; user-select: none; border-bottom: 1px solid var(--border); }
-  tr:hover td { background: #f0f7fc; }
+  tr:hover td { background: var(--row-hover); }
   a { color: var(--blue); text-decoration: underline; }
   a:hover { color: var(--blue-dark); }
   .sym { font-weight: bold; }
-  .pill { display: inline-block; background: #f3f3f3; border: 1px solid #bdbdbd; border-radius: 3px;
+  .pill { display: inline-block; background: var(--neutral-bg); border: 1px solid var(--neutral-border); border-radius: 3px;
           padding: 0 6px; font-size: 11px; color: var(--muted); margin: 1px 2px 0 0; }
   .seqbtn, .homobtn, .ctxbtn { font-size: 11px; padding: 3px 8px; }
   .ctxbtn { margin-top: 4px; }
@@ -145,9 +190,9 @@
   .badge { display: inline-block; padding: 0 5px; font-size: 10px; font-weight: bold; vertical-align: middle;
            border: 1px solid var(--field); border-radius: 3px; }
   .badge.rev   { background: var(--green-tint); color: var(--green-text); border: 1.5px solid var(--green); }
-  .badge.unrev { background: #f3f3f3; color: var(--muted); border: 1px dashed var(--field); }
+  .badge.unrev { background: var(--neutral-bg); color: var(--muted); border: 1px dashed var(--field); }
   .badge.src   { background: var(--blue-tint); color: var(--blue-dark); border-color: var(--blue); cursor: help; }
-  .seqbox { display: none; background: #f7f7f7; border: 1px solid var(--border); border-radius: 3px;
+  .seqbox { display: none; background: var(--seqbox-bg); border: 1px solid var(--border); border-radius: 3px;
             padding: 8px; margin-top: 6px; font-family: "Courier New", Courier, monospace;
             font-size: 11px; white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
   .homobox { display: none; margin-top: 6px; font-size: 12px; }
@@ -155,8 +200,9 @@
   .homobox td { padding: 4px 8px; }
 
   /* Mention context: a full-width row under the gene, with highlighted sentences. */
-  tr.ctxrow td, tr.ctxrow:hover td { background: #fafcfe; padding: 0; }
+  tr.ctxrow td, tr.ctxrow:hover td { background: var(--ctxrow-bg); padding: 0; }
   .ctxbox { position: sticky; left: 0; padding: 10px 14px 12px; border-left: 4px solid var(--blue); font-size: 13px; }
+  .pmid-author { color: var(--muted); font-size: 12px; }
   .ctxhead { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
   .ctxbox .ctxhead:not(:first-child) { margin-top: 14px; }
   .snip { margin: 0 0 10px; }
@@ -166,7 +212,7 @@
   .snip-text { line-height: 1.5; }
   mark { background: var(--orange-tint); color: var(--text); font-weight: bold;
          border-bottom: 2px solid var(--orange-text); padding: 0 1px; }
-  code { background: #f2f2f2; padding: 1px 5px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; font-family: "Courier New", Courier, monospace; }
+  code { background: var(--btn-bg); padding: 1px 5px; border: 1px solid var(--code-border); border-radius: 3px; font-size: 12px; font-family: "Courier New", Courier, monospace; }
 
   /* Organism comparison. Each cell state differs in text AND styling, never colour alone:
      literature = bold text on a tint; ortholog = dashed left edge; none = grey "none";
@@ -187,12 +233,12 @@
   #cTable th { z-index: 2; }
   #cTable th:first-child { left: 0; z-index: 3; }
   #cTable tr:not(.ctxrow) > td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); border-right: 1px solid var(--border); }
-  #cTable tr:not(.ctxrow):hover > td:first-child { background: #f0f7fc; }
+  #cTable tr:not(.ctxrow):hover > td:first-child { background: var(--row-hover); }
   #cTable th .orginfo { display: block; font-weight: normal; font-size: 11px; color: var(--muted); }
   td.c-lit { background: var(--blue-tint); font-weight: bold; }
   td.c-lit .noseq { font-weight: normal; }
   td.c-orth { border-left: 3px dashed var(--blue); }
-  td.c-abs { color: var(--muted); background: #f3f3f3; }
+  td.c-abs { color: var(--muted); background: var(--neutral-bg); }
   td.c-unk { color: var(--muted); font-style: italic; }
   td.c-unk span { border-bottom: 1px dotted var(--muted); cursor: help; }
   .cbadge { font-size: 10px; }
@@ -204,6 +250,7 @@
   <nav aria-label="Links">
     <a href="/docs" target="_blank" rel="noopener">API docs</a>
     <a href="https://github.com/LeonidasSp/gene-literature-miner" target="_blank" rel="noopener">GitHub</a>
+    <button type="button" id="themeToggle" class="themebtn" aria-label="Switch to dark mode" title="Switch to dark mode">&#9789;</button>
   </nav>
 </header>
 <main>
@@ -525,7 +572,11 @@ function renderRows() {
     const tr = document.createElement("tr");
     tr.id = "r_" + g.gene_id;
     const pmids = (g.pmids || []).slice(0, 6)
-      .map((p) => `<a href="https://pubmed.ncbi.nlm.nih.gov/${p}/" target="_blank">${p}</a>`)
+      .map((p) => {
+        const a = (DATA.authors || {})[p];
+        return `<a href="https://pubmed.ncbi.nlm.nih.gov/${p}/" target="_blank">${p}</a>` +
+          (a ? ` <span class="pmid-author">(${escapeHtml(a)})</span>` : "");
+      })
       .join(", ") + ((g.pmids || []).length > 6 ? " …" : "");
     const aliases = (g.aliases || []).map((a) => `<span class="pill">${escapeHtml(a)}</span>`).join("");
     tr.innerHTML =
@@ -655,7 +706,9 @@ function markedText(text, marks) {
 }
 
 function snippetHtml(s) {
-  const paper = `<a href="https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(s.pmid)}/" target="_blank" rel="noopener">PMID ${escapeHtml(s.pmid)}</a>`;
+  const author = (DATA.authors || {})[s.pmid];
+  const paper = `<a href="https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(s.pmid)}/" target="_blank" rel="noopener">` +
+    `${author ? escapeHtml(author) + ", " : ""}PMID ${escapeHtml(s.pmid)}</a>`;
   return `<div class="snip"><div class="snip-src"><span class="sec">${escapeHtml(s.section)}</span> · ${paper}` +
     (s.title ? ` · <i>${escapeHtml(s.title)}</i>` : "") + `</div>` +
     `<div class="snip-text">${markedText(s.text, s.marks)}</div></div>`;
@@ -1113,6 +1166,31 @@ $("cQuery").addEventListener("keydown", (e) => { if (e.key === "Enter") runCompa
 // The "?" help buttons show their tooltip on hover/focus; give each the same
 // text as an accessible name so screen readers announce it too.
 document.querySelectorAll(".help").forEach((h) => h.setAttribute("aria-label", h.dataset.tip));
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+function updateThemeButton() {
+  const dark = currentTheme() === "dark";
+  const btn = $("themeToggle");
+  btn.textContent = dark ? "☀" : "☽";
+  const label = dark ? "Switch to light mode" : "Switch to dark mode";
+  btn.setAttribute("aria-label", label);
+  btn.title = label;
+}
+function setTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  try { localStorage.setItem("glm-theme", theme); } catch (e) {}
+  updateThemeButton();
+}
+$("themeToggle").addEventListener("click", () => setTheme(currentTheme() === "dark" ? "light" : "dark"));
+if (matchMedia("(prefers-color-scheme: dark)").addEventListener) {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (!document.documentElement.getAttribute("data-theme")) updateThemeButton();
+  });
+}
+updateThemeButton();
 
 $("go").addEventListener("click", runSearch);
 $("exportFasta").addEventListener("click", exportFasta);

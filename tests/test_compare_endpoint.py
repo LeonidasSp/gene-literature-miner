@@ -130,7 +130,7 @@ class CompareEndpoint(unittest.TestCase):
         async def fake_collect(req):
             if req.organism in self.fail_scan:
                 raise RuntimeError("boom (internal detail)")
-            return [dict(g) for g in GENES.get(req.organism, [])], "term", 12, None, None
+            return [dict(g) for g in GENES.get(req.organism, [])], "term", 12, None, None, {}
 
         main.client, main.uniprot, main.orthodb = FakeNCBI(), FakeUniProt(), self.orthodb
         main._collect_genes = fake_collect

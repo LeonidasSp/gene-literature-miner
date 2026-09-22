@@ -155,6 +155,34 @@ class NCBIClient:
                 out[uid] = result[uid]
         return out
 
+    # --------------------------------------------------------------- PubMed db
+    async def article_summaries(self, pmids: list[str]) -> dict[str, str]:
+        """esummary on PubMed, batched. Returns {pmid: "Lastname et al."}.
+
+        Used to label the PMID links with a citation the way a reference list
+        does, without fetching (and parsing) the full citation. Papers that
+        ESummary has no author list for are simply left out of the result.
+        """
+        out: dict[str, str] = {}
+        for i in range(0, len(pmids), 200):
+            batch = pmids[i : i + 200]
+            params = {
+                **self._common(),
+                "db": "pubmed",
+                "id": ",".join(batch),
+                "retmode": "json",
+            }
+            try:
+                resp = await self._get(f"{EUTILS}/esummary.fcgi", params)
+            except RuntimeError:
+                continue
+            result = resp.json().get("result", {})
+            for uid in result.get("uids", []):
+                label = _citation_label(result[uid].get("authors") or [])
+                if label:
+                    out[uid] = label
+        return out
+
     async def lineage(self, taxid: str) -> str:
         """Full taxonomic lineage string for a taxid (cached), for source routing."""
         taxid = str(taxid or "").strip()
@@ -395,6 +423,26 @@ def _best_coord_summary(
     if best is None:
         return None
     return best[1], best[2]
+
+
+def _author_surname(author_name: str) -> str:
+    """PubMed's ESummary author names are "Surname Initials" (e.g. "Chi X",
+    "van der Berg JW"); drop the trailing initials token to get the surname.
+    """
+    parts = author_name.strip().split()
+    return " ".join(parts[:-1]) if len(parts) > 1 else author_name.strip()
+
+
+def _citation_label(authors: list[dict[str, Any]]) -> Optional[str]:
+    """"Chi et al." style label from an ESummary `authors` list, or None."""
+    names = [_author_surname(a["name"]) for a in authors if a.get("name")]
+    if not names:
+        return None
+    if len(names) == 1:
+        return names[0]
+    if len(names) == 2:
+        return f"{names[0]} & {names[1]}"
+    return f"{names[0]} et al."
 
 
 # ---------------------------------------------------------------- parse helpers

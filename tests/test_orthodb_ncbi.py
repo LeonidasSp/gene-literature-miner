@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 import httpx  # noqa: E402
 import orthodb  # noqa: E402
-from ncbi import species_from_taxonomy_xml  # noqa: E402
+from ncbi import _citation_label, species_from_taxonomy_xml  # noqa: E402
 from orthodb import OrthoDBClient, OrthoDBUnavailable  # noqa: E402
 
 
@@ -206,6 +206,31 @@ class SpeciesFromTaxonomyXml(unittest.TestCase):
     def test_garbage(self):
         self.assertIsNone(species_from_taxonomy_xml(""))
         self.assertIsNone(species_from_taxonomy_xml("<html>error</html>"))
+
+
+class CitationLabel(unittest.TestCase):
+    def test_no_authors_is_none(self):
+        self.assertIsNone(_citation_label([]))
+
+    def test_single_author_is_just_the_surname(self):
+        self.assertEqual(_citation_label([{"name": "Chi X"}]), "Chi")
+
+    def test_two_authors_are_joined(self):
+        self.assertEqual(
+            _citation_label([{"name": "Chi X"}, {"name": "Liu Y"}]), "Chi & Liu"
+        )
+
+    def test_three_or_more_is_et_al(self):
+        self.assertEqual(
+            _citation_label([{"name": "Chi X"}, {"name": "Liu Y"}, {"name": "Wang Z"}]),
+            "Chi et al.",
+        )
+
+    def test_multi_word_surname_keeps_the_whole_surname(self):
+        self.assertEqual(_citation_label([{"name": "van der Berg JW"}]), "van der Berg")
+
+    def test_entries_without_a_name_are_skipped(self):
+        self.assertEqual(_citation_label([{}, {"name": "Chi X"}]), "Chi")
 
 
 if __name__ == "__main__":

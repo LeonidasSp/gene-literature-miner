@@ -203,11 +203,12 @@ async def _collect_pmids(req: SearchRequest) -> list[str]:
 
 async def _collect_genes(
     req: SearchRequest,
-) -> tuple[list[dict[str, Any]], str, int, Optional[str], Optional[str]]:
+) -> tuple[list[dict[str, Any]], str, int, Optional[str], Optional[str], dict[str, str]]:
     """Steps 1-3: literature -> PubTator -> Gene-db metadata. No enrichment yet.
 
-    Returns (genes, pubmed_term, paper_count, message, note). `note` is an
-    informational aside (organism normalised, or genus-level fallback used).
+    Returns (genes, pubmed_term, paper_count, message, note, authors). `note`
+    is an informational aside (organism normalised, or genus-level fallback
+    used); `authors` maps pmid -> "Lastname et al." for the PMID links.
     """
     note: Optional[str] = None
     # Normalise the organism up front. When NCBI Taxonomy recognises it we use the
@@ -224,13 +225,16 @@ async def _collect_genes(
     term = _build_term(req.query, req.organism)
     pmids = await _collect_pmids(req)
     if not pmids:
-        return [], term, 0, "No articles matched this query.", note
+        return [], term, 0, "No articles matched this query.", note, {}
 
-    raw_genes = await client.genes_from_pubtator(pmids, full_text=req.full_text)
+    raw_genes, authors = await asyncio.gather(
+        client.genes_from_pubtator(pmids, full_text=req.full_text),
+        client.article_summaries(pmids),
+    )
     if not raw_genes:
         return [], term, len(pmids), (
             "Articles found, but PubTator returned no gene annotations."
-        ), note
+        ), note, authors
 
     candidate_ids = [
         gid for gid, e in raw_genes.items() if e["count"] >= req.min_mentions
@@ -291,7 +295,7 @@ async def _collect_genes(
             note = f"{note}; {fallback}" if note else fallback
 
     genes.sort(key=lambda g: (g["mention_count"], g["paper_count"]), reverse=True)
-    return genes, term, len(pmids), None, note
+    return genes, term, len(pmids), None, note, authors
 
 
 def _public_gene(g: dict[str, Any]) -> dict[str, Any]:
@@ -441,12 +445,12 @@ def _top_mention(mentions: dict[str, int]) -> str:
 @app.post("/api/search")
 async def search(req: SearchRequest) -> dict[str, Any]:
     async with _search_gate:
-        genes, term, paper_count, message, note = await _collect_genes(req)
+        genes, term, paper_count, message, note, authors = await _collect_genes(req)
         if not genes:
             return {
                 "query": req.query, "organism": req.organism, "pubmed_term": term,
                 "paper_count": paper_count, "genes": [], "message": message,
-                "note": note,
+                "note": note, "authors": authors,
             }
         to_fetch = genes[: req.max_genes_with_sequence]
         await asyncio.gather(*(_enrich_gene(g, req) for g in to_fetch))
@@ -454,6 +458,7 @@ async def search(req: SearchRequest) -> dict[str, Any]:
             "query": req.query, "organism": req.organism, "pubmed_term": term,
             "paper_count": paper_count, "gene_count": len(genes),
             "genes": [_public_gene(g) for g in genes], "note": note,
+            "authors": authors,
         }
 
 
@@ -483,12 +488,12 @@ async def search_stream(
     async def gen():
         async with _search_gate:
             try:
-                genes, term, paper_count, message, note = await _collect_genes(req)
+                genes, term, paper_count, message, note, authors = await _collect_genes(req)
                 yield _sse("meta", {
                     "query": req.query, "organism": req.organism,
                     "pubmed_term": term, "paper_count": paper_count,
                     "gene_count": len(genes), "source": req.source,
-                    "note": note,
+                    "note": note, "authors": authors,
                 })
                 if not genes:
                     yield _sse("done", {"message": message, "gene_count": 0})
@@ -551,7 +556,7 @@ async def _scan_organism(info: dict[str, Any], query: str, max_papers: int,
                         min_mentions=min_mentions, source=source, full_text=full_text)
     out: dict[str, Any] = {"label": info["label"], "genes": [], "papers": 0, "note": None, "error": None}
     try:
-        genes, _term, papers, _message, note = await _collect_genes(req)
+        genes, _term, papers, _message, note, _authors = await _collect_genes(req)
     except Exception:
         out["error"] = "The literature search failed for this organism."
         return out
