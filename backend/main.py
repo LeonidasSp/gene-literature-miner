@@ -40,6 +40,7 @@ from europepmc import EuropePMCClient
 from ncbi import NCBIClient, is_locus_tag
 import compare
 from orthodb import DOMAIN_LEVELS, OrthoDBClient, OrthoDBUnavailable
+from relations import RelationsClient
 from uniprot import UniProtClient
 import veupathdb
 import wormbase
@@ -58,6 +59,7 @@ europepmc: EuropePMCClient
 orthodb: OrthoDBClient
 bvbrc: BVBRCClient
 ensembl: EnsemblClient
+relations: RelationsClient
 cache: Cache
 _search_gate = asyncio.Semaphore(MAX_CONCURRENT_SEARCHES)
 _last_seen: dict[str, float] = {}
@@ -65,7 +67,7 @@ _last_seen: dict[str, float] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client, uniprot, europepmc, orthodb, bvbrc, ensembl, cache
+    global client, uniprot, europepmc, orthodb, bvbrc, ensembl, relations, cache
     cache = Cache()
     client = NCBIClient()
     uniprot = UniProtClient(cache=cache)
@@ -73,6 +75,7 @@ async def lifespan(app: FastAPI):
     orthodb = OrthoDBClient(cache=cache)
     bvbrc = BVBRCClient(cache=cache)
     ensembl = EnsemblClient(cache=cache)
+    relations = RelationsClient(cache=cache)
     try:
         yield
     finally:
@@ -82,6 +85,7 @@ async def lifespan(app: FastAPI):
         await orthodb.aclose()
         await bvbrc.aclose()
         await ensembl.aclose()
+        await relations.aclose()
         cache.close()
 
 
@@ -279,6 +283,7 @@ async def _collect_genes(
             "gene_url": f"https://www.ncbi.nlm.nih.gov/gene/{gid}",
             "sequence": None,
             "protein": None,
+            "relations": None,
             "reason": None,
             "_summary": summ,
             "_candidates": candidate_symbols,
@@ -330,9 +335,21 @@ async def _enrich_gene(g: dict[str, Any], req: SearchRequest) -> dict[str, Any]:
         except Exception:
             return None
 
-    seq, protein = await asyncio.gather(_seq(), _prot())
+    async def _rel() -> dict[str, list[dict[str, Any]]]:
+        # The official NCBI symbol, not a literature-mention alias or locus
+        # tag: PubTator3's relation index is looked up by exact symbol text
+        # with no species scoping, so the wrong casing/alias just misses.
+        ncbi_name = g.get("ncbi_name")
+        symbol = ncbi_name if ncbi_name and not is_locus_tag(ncbi_name) else g.get("symbol")
+        try:
+            return await relations.for_gene(symbol or "")
+        except Exception:
+            return {"diseases": [], "chemicals": []}
+
+    seq, protein, rel = await asyncio.gather(_seq(), _prot(), _rel())
     g["sequence"] = seq
     g["protein"] = protein
+    g["relations"] = rel
     if seq and seq.get("gene_url"):
         g["gene_url"] = seq["gene_url"]
     g["reason"] = _reason(seq, protein)
@@ -340,6 +357,7 @@ async def _enrich_gene(g: dict[str, Any], req: SearchRequest) -> dict[str, Any]:
         "gene_id": g["gene_id"],
         "sequence": seq,
         "protein": protein,
+        "relations": rel,
         "reason": g["reason"],
         "gene_url": g["gene_url"],
     }
