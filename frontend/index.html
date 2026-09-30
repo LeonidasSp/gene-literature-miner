@@ -198,6 +198,9 @@
   .homobox { display: none; margin-top: 6px; font-size: 12px; }
   .homobox table { margin: 0; font-size: 12px; }
   .homobox td { padding: 4px 8px; }
+  .relbox { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); }
+  .relhead { display: flex; align-items: center; gap: 2px; }
+  .relbox .pill { border-style: dashed; cursor: help; }
 
   /* Mention context: a full-width row under the gene, with highlighted sentences. */
   tr.ctxrow td, tr.ctxrow:hover td { background: var(--ctxrow-bg); padding: 0; }
@@ -342,7 +345,7 @@
               <th>Papers (PMID)</th>
               <th>Nucleotide sequence</th>
               <th>Protein (UniProt)</th>
-              <th>Function</th>
+              <th title="Also shows diseases and chemicals the literature associates with this exact gene symbol (PubTator3), when it has data for it">Function</th>
               <th>Orthologues</th>
             </tr>
           </thead>
@@ -499,7 +502,7 @@ function runSearch() {
     const p = JSON.parse(e.data);
     const g = (DATA.genes || []).find((x) => x.gene_id === p.gene_id);
     if (g) {
-      g.sequence = p.sequence; g.protein = p.protein;
+      g.sequence = p.sequence; g.protein = p.protein; g.relations = p.relations;
       g.reason = p.reason; g.gene_url = p.gene_url || g.gene_url;
       enrichRow(g);
     }
@@ -673,7 +676,31 @@ function fnCell(g) {
   (a.pfam || []).forEach((p) => refs.push(`<a href="https://www.ebi.ac.uk/interpro/entry/pfam/${p.id}/" target="_blank">${escapeHtml(p.id)}</a>`));
   if ((a.kegg || []).length) refs.push(`<a href="https://www.genome.jp/dbget-bin/www_bget?${encodeURIComponent(a.kegg[0])}" target="_blank">KEGG</a>`);
   if (refs.length) bits.push(`<div class="noseq">${refs.join(" · ")}</div>`);
+  bits.push(relCell(g));
   return bits.join("") || `<span class="noseq">—</span>`;
+}
+
+// Diseases/chemicals PubTator3's text-mining model (BioREx) has linked to this
+// exact gene symbol across the whole literature -- independent of whether a
+// paper turned up in *this* search, and independent of UniProt match. Empty
+// for almost all bacterial/archaeal/viral genes (checked directly against the
+// API: none of a spread of AMR/biofilm symbols had any data), which is a real
+// gap in that resource, not a bug here -- so the panel just doesn't appear.
+function relCell(g) {
+  const rel = g.relations || {};
+  const diseases = rel.diseases || [];
+  const chemicals = rel.chemicals || [];
+  if (!diseases.length && !chemicals.length) return "";
+  const pills = (items) => items.map((x) =>
+    `<span class="pill" title="${x.publications} paper(s) in PubTator3's index">${escapeHtml(x.name)}</span>`).join("");
+  const rows = [];
+  if (diseases.length) rows.push(`<div class="noseq">Diseases (literature-wide)</div><div>${pills(diseases)}</div>`);
+  if (chemicals.length) rows.push(`<div class="noseq">Chemicals that suppress it</div><div>${pills(chemicals)}</div>`);
+  return `<div class="relbox">` +
+    `<div class="noseq relhead">Known relations` +
+    `<button type="button" class="help" aria-label="How these relations are found" ` +
+    `data-tip="From PubTator3's text-mined relations, across all of PubMed -- not limited to the papers in this search, and not scoped to this organism (a shared gene symbol in another species could contribute). Empty for most non-human genes.">?</button>` +
+    `</div>${rows.join("")}</div>`;
 }
 
 function homoCell(g) {
