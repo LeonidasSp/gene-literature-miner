@@ -2,9 +2,9 @@
 Tiny async-friendly key/value cache with TTL.
 
 Gene→protein and protein→cluster lookups are stable for long stretches, so
-caching them cuts repeat-query latency and load on NCBI/UniProt/OrthoDB (and
-softens Hugging Face cold starts). Backed by SQLite for persistence across
-restarts, with an in-process dict in front; if the SQLite file can't be opened
+caching them cuts repeat-query latency and load on NCBI/UniProt/OrthoDB.
+Backed by SQLite for persistence across restarts, with an in-process dict in
+front; if the SQLite file can't be opened
 (e.g. a read-only host) it degrades silently to memory-only.
 """
 from __future__ import annotations
