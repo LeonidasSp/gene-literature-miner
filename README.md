@@ -2,13 +2,13 @@
 
 [![CI](https://github.com/LeonidasSp/gene-literature-miner/actions/workflows/ci.yml/badge.svg)](https://github.com/LeonidasSp/gene-literature-miner/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Live demo](https://img.shields.io/badge/demo-live%20on%20Hugging%20Face-yellow)](https://leonsp-gene-literature-miner.hf.space)
+[![Live demo](https://img.shields.io/badge/demo-genelitminer.com-brightgreen)](https://www.genelitminer.com)
 
 Mine the scientific literature for the genes discussed in a publication, then pull
 each gene's **nucleotide sequence**, **protein sequence**, **functional annotation**,
 and **cross-species homologues** — all from open databases, no API key required.
 
-**🔴 Live app:** **https://leonsp-gene-literature-miner.hf.space** — nothing to install.
+**🔴 Live app:** **https://www.genelitminer.com** — nothing to install.
 
 ![Search results for biofilm formation in Escherichia coli: genes with mention counts, nucleotide and protein sequences, GO terms, Pfam domains and an orthologue button](docs/screenshot.png)
 
@@ -58,7 +58,7 @@ each gene resolves. Every data source is free and needs no key.
 
 ## Run it
 
-Optional — the [hosted demo](https://leonsp-gene-literature-miner.hf.space) above needs no setup. Run it yourself to self-host, remove the shared-server rate limits, or add an `NCBI_API_KEY`.
+Optional — the [hosted demo](https://www.genelitminer.com) above needs no setup. Run it yourself to self-host, remove the shared-server rate limits, or add an `NCBI_API_KEY`.
 
 ### Docker (recommended, no Python needed)
 
